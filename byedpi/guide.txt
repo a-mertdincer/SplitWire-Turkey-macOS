@@ -1,0 +1,33 @@
+Geliştirici araçları var mı kontrol etmek için terminale gcc --version yaz
+Yoksa zaten geliştirici paketlerini kurayım mı diyecek, kur de, yüklesin.
+Yükledikten sonra hepsi var mı kontrol et aşağıdaki komutlarla
+ gcc --version 
+ make --version
+ git —-version
+
+Hepsi varsa devam et.
+
+ByeDPI indir.
+ git clone https://github.com/hufrea/byedpi.git
+
+ByeDPI klasörüne gir.
+ cd byedpi
+
+ByeDPI’ı derle.
+ make
+
+Zaten byedpi klasörü içindeysen ./ciadpi -r 1+s ile çalıştır. Değilsen önce cd byedpi ile klasöre gir.
+
+Önce sistem ayarlarından Proxy ayarlayarak tarayıcı discorda falan giriyor mu bak. Discord yüklü ise Discord’u da aç. Açılıyorsa sadece Discord uygulamasında byedpi kullanmak için aşağıdakileri yap.
+
+Sistem ayarlarından proxy ayarını kapatabilirsin.
+
+Discord ayar dosyasını aç.
+ nano "/Users/ventura/Library/Application Support/discord/settings.json"
+
+Şu satırları “}” den önceki son satıra “,” koyduktan sonra yapıştır.
+ "SKIP_HOST_UPDATE": true,
+ "SKIP_MODULE_UPDATE": true
+
+Terminalden aşağıdaki satırı yazınca Discord uygulaması ByeDPI proxy adresine yönlenerek açılır.
+ open -a "/Applications/Discord.app/Contents/MacOS/Discord" --args --proxy-server=socks5://127.0.0.1:1080 --ignore-certificate-errors
