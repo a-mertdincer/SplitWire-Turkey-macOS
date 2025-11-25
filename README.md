@@ -68,7 +68,7 @@ swift build -c release
 
 ## Katkıda Bulunma
 
-Bu proje orijinal [SplitWire-Turkey-macOS](https://github.com/ORJINAL_REPO_URL) projesinin geliştirilmiş versiyonudur.
+Bu proje [SplitWire-Turkey](https://github.com/cagritaskn/SplitWire-Turkey) projesinin macOS için geliştirilmiş versiyonudur.
 
 Katkılarınızı bekliyoruz! Pull request göndermekten çekinmeyin.
 
