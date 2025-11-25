@@ -74,16 +74,12 @@ Katkılarınızı bekliyoruz! Pull request göndermekten çekinmeyin.
 
 ## Lisans
 
-Bu proje orijinal projenin lisansını takip eder.
+Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için [LICENSE](LICENSE) dosyasına bakın.
 
 ## Teşekkürler
 
 - [ciadpi](https://github.com/nomoresat/DPI-bypass-multi) - DPI bypass aracı
 - Orijinal SplitWire Turkey projesi ekibi
-
-## Ekran Görüntüleri
-
-(TODO: Ekran görüntüleri eklenecek)
 
 ## Sorun Giderme
 
