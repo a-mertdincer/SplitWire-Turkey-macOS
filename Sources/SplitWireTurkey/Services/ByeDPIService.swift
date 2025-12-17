@@ -31,7 +31,7 @@ class ByeDPIService: ObservableObject {
     init() {
         // Find ciadpi binary
         // Priority:
-        // 1. Inside app bundle Resources
+        // 1. Inside app bundle Resources (release builds)
         // 2. Next to executable (for development)
         // 3. In byedpi directory (fallback)
 
@@ -44,13 +44,23 @@ class ByeDPIService: ObservableObject {
             }
         }
 
-        // Try next to executable
+        // Try next to executable (development mode)
         if let execPath = Bundle.main.executablePath {
             let execDir = (execPath as NSString).deletingLastPathComponent
             let devPath = "\(execDir)/../../../byedpi/ciadpi"
             if FileManager.default.fileExists(atPath: devPath) {
                 self.ciadpiPath = devPath
                 print("ByeDPI found in dev path: \(devPath)")
+                return
+            }
+        }
+
+        // Try relative to app bundle (macOS app bundle structure)
+        if let bundleURL = Bundle.main.bundleURL.path as String? {
+            let appBundlePath = "\(bundleURL)/Contents/Resources/bin/ciadpi"
+            if FileManager.default.fileExists(atPath: appBundlePath) {
+                self.ciadpiPath = appBundlePath
+                print("ByeDPI found in app bundle: \(appBundlePath)")
                 return
             }
         }
