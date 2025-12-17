@@ -345,7 +345,7 @@ class MenuBarService: ObservableObject {
     }
 
     private func findCiadpiPath() -> String {
-        // Check bundle resources
+        // Check bundle resources (release builds)
         if let bundlePath = Bundle.main.resourcePath {
             let resourcePath = "\(bundlePath)/bin/ciadpi"
             if FileManager.default.fileExists(atPath: resourcePath) {
@@ -353,12 +353,20 @@ class MenuBarService: ObservableObject {
             }
         }
 
-        // Check next to executable
+        // Check next to executable (development)
         if let execPath = Bundle.main.executablePath {
             let execDir = (execPath as NSString).deletingLastPathComponent
             let devPath = "\(execDir)/../../../byedpi/ciadpi"
             if FileManager.default.fileExists(atPath: devPath) {
                 return devPath
+            }
+        }
+
+        // Try app bundle structure
+        if let bundleURL = Bundle.main.bundleURL.path as String? {
+            let appBundlePath = "\(bundleURL)/Contents/Resources/bin/ciadpi"
+            if FileManager.default.fileExists(atPath: appBundlePath) {
+                return appBundlePath
             }
         }
 

@@ -19,7 +19,8 @@ let package = Package(
             dependencies: [],
             path: "Sources/SplitWireTurkey",
             resources: [
-                .process("Resources")
+                .process("Resources/bin"),
+                .copy("Resources")
             ]
         )
     ]
