@@ -22,7 +22,8 @@ Modern macOS uygulaması ile ByeDPI ve WireGuard yönetimi.
 
 1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından son sürümü indirin
 2. `SplitWire-Turkey.app` dosyasını Applications klasörüne sürükleyin
-3. Uygulamayı açın
+3. Komutu terminalde çalıştırın, şifrenizi girmenizi isterse girin: sudo xattr -rd com.apple.quarantine "/Applications/SplitWire-Turkey.app/"
+4. Uygulamayı açın
 
 ## Kullanım
 
