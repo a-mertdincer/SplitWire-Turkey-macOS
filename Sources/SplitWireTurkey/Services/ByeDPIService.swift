@@ -1,582 +1,920 @@
 import Foundation
 import Combine
 import AppKit
+import Darwin
 
+/// Durum mesajının türü (mantık metin eşleştirmesine değil bu bayrağa dayanır).
+enum ByeDPIStatusKind: Equatable {
+    case info, success, warning, error
+}
+
+enum ByeDPIError: LocalizedError {
+    case binaryNotFound
+    case emptyCustomArgs
+    case portInUseByCiadpi(port: Int, pids: [Int32])
+    case portInUseByOther(port: Int, command: String, pid: Int32)
+    case exitedEarly(status: Int32, stderr: String, command: String)
+    case launchFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .binaryNotFound:
+            return L("ciadpi programı bulunamadı. Uygulama paketi eksik olabilir; uygulamayı yeniden indirin.",
+                     "The ciadpi program was not found. The app bundle may be incomplete; download the app again.")
+        case .emptyCustomArgs:
+            return L("Özel (Custom) parametreler boş. Lütfen ciadpi parametrelerini girin (ör. -r 1+s) veya başka bir yöntem seçin.",
+                     "Custom arguments are empty. Enter ciadpi arguments (e.g. -r 1+s) or choose another method.")
+        case .portInUseByCiadpi(let port, let pids):
+            let list = pids.map(String.init).joined(separator: ", ")
+            return L("Port \(port) başka bir ByeDPI (ciadpi) süreci tarafından kullanılıyor (PID: \(list)).",
+                     "Port \(port) is in use by another ByeDPI (ciadpi) process (PID: \(list)).")
+        case .portInUseByOther(let port, let command, let pid):
+            return L("Port \(port) başka bir program tarafından kullanılıyor: \(command) (PID \(pid)). Bu programı kapatın ve tekrar deneyin.",
+                     "Port \(port) is in use by another program: \(command) (PID \(pid)). Quit that program and try again.")
+        case .exitedEarly(let status, let stderr, let command):
+            var message = L("ciadpi başlatıldıktan hemen sonra kapandı (çıkış kodu \(status)).",
+                            "ciadpi exited right after starting (exit code \(status)).")
+            let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                message += L("\n\nHata çıktısı:\n\(trimmed)", "\n\nError output:\n\(trimmed)")
+            }
+            message += L("\n\nKomut: \(command)", "\n\nCommand: \(command)")
+            return message
+        case .launchFailed(let message):
+            return L("ciadpi başlatılamadı: \(message)", "Could not start ciadpi: \(message)")
+        }
+    }
+}
+
+/// Uygulamadan çıkış hazırlığının sonucu.
+enum QuitPreparation: Equatable {
+    /// Sistem proxy kapalı; ciadpi durduruldu.
+    case clean
+    /// Sistem proxy kapatılamadı (iptal, zaman aşımı, hata); ciadpi henüz DURDURULMADI.
+    case proxyStillOn(services: [String], reason: String)
+}
+
+/// ByeDPI (ciadpi) yerel SOCKS5 proxy'sini yöneten TEK servis.
+/// Pencere ve menü çubuğu aynı örneği (`ByeDPIService.shared`) kullanır.
 @MainActor
-class ByeDPIService: ObservableObject {
-    @Published var isRunning = false
-    @Published var isProcessing = false
-    @Published var statusMessage = ""
-    @Published var currentPreset = "Standart"
-    @Published var isSystemProxyEnabled = false
+final class ByeDPIService: ObservableObject {
+    static let shared = ByeDPIService()
 
+    static let presetDefaultsKey = "byedpiPreset"
+    static let legacyPresetDefaultsKey = "menuBarPreset"
+    static let customArgsDefaultsKey = "byedpiCustomArgs"
+    static let defaultCustomArgs = "-r 1+s"
+
+    let host = ByeDPIArguments.defaultHost
+    /// SOCKS portu (uygulamanın geri kalanı 1080 varsayar; testler farklı port kullanabilir).
+    let port: Int
+    /// UI sırası ile presetler (Custom en sonda).
+    let presets = ByeDPIPresets.all
+
+    /// 1080 portunda bir ciadpi dinliyor mu (bizim veya harici)?
+    @Published private(set) var isRunning = false
+    /// Başlatma/durdurma sürüyor.
+    @Published private(set) var isProcessing = false
+    /// Çalışan ciadpi bu oturumda başlatılmadı (ör. önceki oturumdan kalmış).
+    @Published private(set) var isExternallyStarted = false
+    @Published private(set) var currentPreset: String
+    /// Custom preset argümanları (değiştikçe kaydedilir).
+    @Published var customArgs: String {
+        didSet { defaults.set(customArgs, forKey: Self.customArgsDefaultsKey) }
+    }
+    /// Çalışan sürecin gerçek argümanları (görüntüleme için).
+    @Published private(set) var runningArgs: String?
+    /// Çalışan sürecin başlatıldığı preset (harici ise nil).
+    @Published private(set) var runningPreset: String?
+    /// Çalışan (harici) ciadpi yalnızca 127.0.0.1'de değil, tüm ağ arayüzlerinde dinliyor
+    /// (v1.0.0 `-i` olmadan başlatıyordu): aynı ağdaki herkes proxy'yi kullanabilir.
+    @Published private(set) var isExposedToNetwork = false
+    /// Son durum mesajı; iki dilde saklanır, okunurken geçerli dile çözülür (#8).
+    @Published private(set) var status: LocalizedText?
+    @Published private(set) var statusKind: ByeDPIStatusKind = .info
+
+    var statusMessage: String { status?.resolved ?? "" }
+    var hasError: Bool { statusKind == .error }
+    var proxyAddress: String { "\(host):\(port)" }
+
+    let systemProxy: SystemProxyService
+
+    private let defaults: UserDefaults
+    private let ciadpiPathOverride: String?
     private var process: Process?
-    private let ciadpiPath: String
+    private var runningTokens: [String]?
+    private var stderrBuffer = LineRingBuffer(capacity: 50)
+    private var isStarting = false
+    private var requestedStopPIDs = Set<Int32>()
+    private var pollTimer: Timer?
+    private var isPolling = false
+    private var pollCount = 0
+    private var isShowingUnexpectedStopAlert = false
+    private var isShuttingDown = false
+    /// LAN'a açık dinleyicisi için zaten uyarı gösterilen PID'ler (bir kez sorulur).
+    private var handledExposedPIDs = Set<Int32>()
 
-    // Preset configurations
-    let presets = [
-        "Standart": "-r 1+s",
-        "Split 1": "-s 1 --tlsrec 1+s",
-        "Split 2": "-s 2 --tlsrec 1+s",
-        "Disorder": "--disorder 1 --auto=torst --tlsrec 1+s",
-        "Fake -1": "--fake -1 --ttl 8",
-        "Fake 1": "-f 1 --ttl 8 -s 2",
-        "OOB": "-o 1 --auto=torst",
-        "Split + Disorder": "-s 1 -d 2 --auto=torst",
-        "Custom": ""  // User will edit this
-    ]
-
-    @Published var customArgs = "-r 1+s"
-
-    init() {
-        // Find ciadpi binary
-        // Priority:
-        // 1. Inside app bundle Resources
-        // 2. Next to executable (for development)
-        // 3. In byedpi directory (fallback)
-
-        if let bundlePath = Bundle.main.resourcePath {
-            let resourcePath = "\(bundlePath)/bin/ciadpi"
-            if FileManager.default.fileExists(atPath: resourcePath) {
-                self.ciadpiPath = resourcePath
-                print("ByeDPI found in bundle: \(resourcePath)")
-                return
-            }
-        }
-
-        // Try next to executable
-        if let execPath = Bundle.main.executablePath {
-            let execDir = (execPath as NSString).deletingLastPathComponent
-            let devPath = "\(execDir)/../../../byedpi/ciadpi"
-            if FileManager.default.fileExists(atPath: devPath) {
-                self.ciadpiPath = devPath
-                print("ByeDPI found in dev path: \(devPath)")
-                return
-            }
-        }
-
-        // Fallback to byedpi directory
-        let fallbackPath = FileManager.default.homeDirectoryForCurrentUser
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Downloads/SplitWire-Turkey-macOS/byedpi/ciadpi")
-        self.ciadpiPath = fallbackPath.path
-        print("ByeDPI fallback path: \(fallbackPath.path)")
+    init(
+        defaults: UserDefaults = .standard,
+        systemProxy: SystemProxyService? = nil,
+        port: Int = ByeDPIArguments.defaultPort,
+        ciadpiPath: String? = nil
+    ) {
+        self.defaults = defaults
+        self.port = port
+        self.ciadpiPathOverride = ciadpiPath
+        // Varsayılan olmayan portta (testler) gerçek 127.0.0.1:1080 proxy'sine asla dokunulmaz
+        self.systemProxy = systemProxy
+            ?? (port == ByeDPIArguments.defaultPort ? SystemProxyService.shared : SystemProxyService(port: port))
+        self.currentPreset = ByeDPIPresets.migrate(
+            stored: defaults.string(forKey: Self.presetDefaultsKey),
+            legacy: defaults.string(forKey: Self.legacyPresetDefaultsKey)
+        )
+        self.customArgs = defaults.string(forKey: Self.customArgsDefaultsKey) ?? Self.defaultCustomArgs
+        defaults.set(currentPreset, forKey: Self.presetDefaultsKey)
     }
 
-    func start(preset: String? = nil, isRetry: Bool = false) async {
-        guard !isRunning else {
-            statusMessage = "ByeDPI zaten çalışıyor"
+    // MARK: - İzleme
+
+    /// Periyodik durum kontrolünü başlatır (uygulama açılışında bir kez çağrılır).
+    func startMonitoring() {
+        guard pollTimer == nil else { return }
+        let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.pollTick()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+        Task { await refreshStatus() }
+    }
+
+    func stopMonitoring() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
+
+    private func pollTick() async {
+        pollCount += 1
+        await refreshStatus()
+        // networksetup taraması daha pahalı; ~10 sn'de bir
+        if pollCount % 4 == 0, !isShuttingDown {
+            await systemProxy.refresh()
+        }
+    }
+
+    /// isRunning'i gerçek durumla uzlaştırır: bizim süreç VEYA 1080'de dinleyen herhangi bir ciadpi.
+    func refreshStatus() async {
+        guard !isPolling, !isProcessing, !isShuttingDown else { return }
+        isPolling = true
+        defer { isPolling = false }
+
+        if let process, process.isRunning {
+            if !isRunning { isRunning = true }
+            if isExternallyStarted { isExternallyStarted = false }
+            if isExposedToNetwork { isExposedToNetwork = false }
             return
         }
 
-        isProcessing = true
-        statusMessage = "ByeDPI başlatılıyor..."
+        let ciadpiListeners = await Self.listeners(port: port).filter(\.isCiadpi)
+        // Bekleme sırasında başlatma/durdurma başladıysa sonucu yok say
+        guard !isProcessing, !isShuttingDown, process == nil else { return }
 
-        do {
-            let args = preset ?? presets[currentPreset] ?? customArgs
-            try await startByeDPI(args: args)
+        let wasRunning = isRunning
+        let wasExternal = isExternallyStarted
+        let nowRunning = !ciadpiListeners.isEmpty
 
-            isRunning = true
-            statusMessage = "ByeDPI başarıyla başlatıldı (SOCKS5 proxy: 127.0.0.1:1080)"
-
-            await showAlert(
-                title: "Başarılı",
-                message: "ByeDPI başarıyla başlatıldı.\n\nSOCKS5 Proxy: 127.0.0.1:1080\n\nDiscord'u başlatmak için:\n1. Terminal'den: open -a Discord --args --proxy-server=socks5://127.0.0.1:1080\n2. Veya sistem proxy ayarlarını yapılandırın."
-            )
-
-        } catch let error as NSError {
-            statusMessage = "Hata: \(error.localizedDescription)"
-
-            // Check if this is a port conflict error
-            if error.code == 4 && !isRetry {
-                // Automatically try to clean up and retry
-                await handlePortConflict(preset: preset)
-            } else {
-                await showAlert(title: "Hata", message: "ByeDPI başlatılamadı: \(error.localizedDescription)")
+        if nowRunning {
+            if !isRunning { isRunning = true }
+            if !isExternallyStarted { isExternallyStarted = true }
+            if runningArgs == nil, let pid = ciadpiListeners.first?.pid {
+                if runningPreset != nil { runningPreset = nil }
+                runningTokens = nil
+                runningArgs = await Self.commandLine(of: pid) ?? "ciadpi (PID \(pid))"
             }
-        }
-
-        isProcessing = false
-    }
-
-    private func handlePortConflict(preset: String?) async {
-        let alert = NSAlert()
-        alert.messageText = "Port 1080 Kullanımda"
-        alert.informativeText = "Port 1080 zaten başka bir process tarafından kullanılıyor.\n\nTüm ByeDPI process'lerini otomatik olarak kapatıp tekrar denemek ister misiniz?"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Tüm Process'leri Temizle ve Tekrar Dene")
-        alert.addButton(withTitle: "İptal")
-
-        let response = alert.runModal()
-
-        if response == .alertFirstButtonReturn {
-            // User wants to clean up and retry
-            await cleanupAllProcessesAndRetry(preset: preset)
-        }
-    }
-
-    private func cleanupAllProcessesAndRetry(preset: String?) async {
-        isProcessing = true
-        statusMessage = "Tüm ByeDPI process'leri temizleniyor..."
-
-        // Kill all ciadpi processes
-        _ = try? await executeShellCommand("pkill -f ciadpi")
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-
-        // Force kill if still running
-        _ = try? await executeShellCommand("pkill -9 -f ciadpi")
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-
-        // Verify port is free
-        let portCheckResult = try? await executeShellCommand("lsof -i :1080")
-        if let portCheck = portCheckResult, !portCheck.isEmpty {
-            // Port still in use, show error
-            await showAlert(
-                title: "Hata",
-                message: "Port 1080 hala kullanımda. Lütfen aşağıdaki komutu Terminal'de çalıştırın:\n\nsudo lsof -ti:1080 | xargs kill -9"
-            )
-            isProcessing = false
-            return
-        }
-
-        statusMessage = "Process'ler temizlendi, yeniden başlatılıyor..."
-
-        // Retry starting ByeDPI
-        await start(preset: preset, isRetry: true)
-
-        isProcessing = false
-    }
-
-    func stop() async {
-        isProcessing = true
-        statusMessage = "ByeDPI durduruluyor..."
-
-        // Terminate our process if exists
-        if let process = process {
-            process.terminate()
-
-            // Wait a bit for graceful shutdown
-            try? await Task.sleep(nanoseconds: 500_000_000)
-
-            // Force kill if still running
-            if process.isRunning {
-                process.interrupt()
-            }
-
-            self.process = nil
-        }
-
-        // Kill any running ciadpi processes
-        _ = try? await executeShellCommand("pkill -9 -f ciadpi")
-
-        // Wait a moment to ensure port is released
-        try? await Task.sleep(nanoseconds: 500_000_000)
-
-        isRunning = false
-        statusMessage = "ByeDPI durduruldu"
-        isProcessing = false
-    }
-
-    func killAllProcesses() async {
-        isProcessing = true
-        statusMessage = "Tüm ByeDPI process'leri zorla kapatılıyor..."
-
-        // First terminate our managed process
-        if let process = process {
-            process.terminate()
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            if process.isRunning {
-                process.interrupt()
-            }
-            self.process = nil
-        }
-
-        // Kill by port using lsof with sudo (AppleScript for privilege)
-        let killPortScript = """
-        do shell script "lsof -ti:1080 | xargs kill -9 2>/dev/null || true" with administrator privileges
-        """
-        _ = try? await executeAppleScriptCommand(killPortScript)
-        try? await Task.sleep(nanoseconds: 300_000_000)
-
-        // Kill all ciadpi processes by name
-        _ = try? await executeShellCommand("pkill -9 -f ciadpi 2>/dev/null || true")
-        try? await Task.sleep(nanoseconds: 300_000_000)
-
-        // Double check with killall
-        _ = try? await executeShellCommand("killall -9 ciadpi 2>/dev/null || true")
-        try? await Task.sleep(nanoseconds: 200_000_000)
-
-        // Verify port is free
-        let portCheck = try? await executeShellCommand("lsof -i :1080 2>/dev/null")
-        if let check = portCheck, !check.isEmpty {
-            statusMessage = "Uyarı: Port 1080 hala kullanımda olabilir"
+            checkNetworkExposure(ciadpiListeners)
         } else {
-            statusMessage = "Tüm ByeDPI process'leri kapatıldı"
+            if isRunning { isRunning = false }
+            if isExternallyStarted { isExternallyStarted = false }
+            if isExposedToNetwork { isExposedToNetwork = false }
+            // Değişmeyen değerleri yeniden atama: @Published her atamada yayınlar ve
+            // menü çubuğu her 2,5 sn'de yeniden kurulurdu (açık alt menü kapanırdı).
+            if runningArgs != nil { runningArgs = nil }
+            if runningPreset != nil { runningPreset = nil }
+            runningTokens = nil
+            if wasRunning && wasExternal {
+                setStatus(.warning, LT("Harici ByeDPI (ciadpi) süreci durdu.",
+                                       "The external ByeDPI (ciadpi) process stopped."))
+                await handleUnexpectedStop(details: nil)
+            }
         }
+    }
 
-        isRunning = false
+    /// Harici ciadpi tüm arayüzlerde dinliyorsa (v1.0.0'dan kalma, LAN'a açık SOCKS proxy)
+    /// kalıcı uyarı bayrağını ayarlar ve her PID için bir kez güvenli yeniden başlatma önerir.
+    private func checkNetworkExposure(_ ciadpiListeners: [PortListener]) {
+        // Adresi bilinmeyen (lsof "n" satırı yok) dinleyici açık sayılmaz: yanlış alarm olmasın
+        let exposed = ciadpiListeners.filter { !$0.addresses.isEmpty && !$0.isLoopbackOnly }
+        let nowExposed = !exposed.isEmpty
+        if isExposedToNetwork != nowExposed { isExposedToNetwork = nowExposed }
+
+        let newlyExposed = exposed.filter { !handledExposedPIDs.contains($0.pid) }
+        guard !newlyExposed.isEmpty else { return }
+        handledExposedPIDs.formUnion(newlyExposed.map(\.pid))
+        let uid = getuid()
+        let ownedByUs = newlyExposed.allSatisfy { $0.uid == nil || $0.uid == uid }
+        // Ayrı görev: refreshStatus (isPolling) uyarı penceresi boyunca bloklanmasın
+        Task { await self.offerSafeRestart(ownedByUs: ownedByUs) }
+    }
+
+    static var exposedWarning: LocalizedText {
+        LT("ByeDPI tüm ağ arayüzlerinde dinliyor — ağınızdaki herkes bu proxy'yi kullanabilir.",
+           "ByeDPI is listening on all network interfaces — anyone on your network can use this proxy.")
+    }
+
+    private func offerSafeRestart(ownedByUs: Bool) async {
+        guard !isShuttingDown, isExposedToNetwork else { return }
+        let warning = Self.exposedWarning
+        guard ownedByUs else {
+            setStatus(.warning, LT("\(warning.tr) Süreç başka bir kullanıcıya ait; kapatmak için 'Tümünü Zorla Kapat'ı kullanın.",
+                                   "\(warning.en) The process belongs to another user; use 'Force stop all' to stop it."))
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = L("ByeDPI ağınıza açık", "ByeDPI is exposed to your network")
+        alert.informativeText = L("Eski bir ByeDPI (v1.0.0'dan kalma) tüm ağ arayüzlerinde dinliyor; aynı Wi-Fi'daki herkes onu proxy olarak kullanabilir.\n\nYalnızca 127.0.0.1 üzerinde güvenli şekilde yeniden başlatılsın mı?",
+                                  "An old ByeDPI (from v1.0.0) is listening on all network interfaces, so anyone on your Wi-Fi can use it as a proxy.\n\nRestart it safely on 127.0.0.1 only?")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L("Güvenli Yeniden Başlat", "Restart safely"))
+        alert.addButton(withTitle: L("Şimdi Değil", "Not now"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            await restart()
+        } else {
+            setStatus(.warning, warning)
+        }
+    }
+
+    // MARK: - Preset
+
+    func args(for presetID: String) -> String {
+        ByeDPIPresets.args(for: presetID, customArgs: customArgs)
+    }
+
+    /// Preset değiştirir ve kaydeder. ByeDPI çalışıyorsa yeni preset ile yeniden başlatır.
+    func selectPreset(_ id: String) {
+        guard ByeDPIPresets.preset(id: id) != nil else { return }
+        let changed = id != currentPreset
+        if changed {
+            currentPreset = id
+            defaults.set(id, forKey: Self.presetDefaultsKey)
+        }
+        restartIfArgumentsChanged()
+    }
+
+    /// Custom argümanları uygular (çalışıyorsa yeniden başlatır).
+    func applyCustomArgs() {
+        if currentPreset != ByeDPIPresets.customID {
+            selectPreset(ByeDPIPresets.customID)
+        } else {
+            restartIfArgumentsChanged()
+        }
+    }
+
+    /// Custom moduna geçer. Kullanıcının kendi kaydettiği özel parametreler ASLA ezilmez;
+    /// yalnızca boşsa veya bir hazır presetle aynıysa mevcut yöntemin parametreleriyle doldurulur.
+    func editAsCustom() {
+        if currentPreset != ByeDPIPresets.customID {
+            let existing = ByeDPIArguments.tokenize(customArgs)
+            let isUntouched = existing.isEmpty
+                || ByeDPIPresets.builtIn.contains { ByeDPIArguments.tokenize($0.args) == existing }
+            if isUntouched {
+                customArgs = args(for: currentPreset)
+            }
+        }
+        selectPreset(ByeDPIPresets.customID)
+    }
+
+    private func restartIfArgumentsChanged() {
+        guard isRunning, !isProcessing else { return }
+        if currentPreset == ByeDPIPresets.customID,
+           ByeDPIArguments.tokenize(customArgs).isEmpty {
+            // Çalışan süreci öldürmeden önce: boş Custom ile yeniden başlatma başarısız olur
+            // ve sistem proxy ölü bir 127.0.0.1:1080'i gösterirdi (#14).
+            setStatus(.warning, LT("Özel parametreler boş; ByeDPI önceki yöntemle çalışmaya devam ediyor. Parametreleri girip 'Uygula'ya basın.",
+                                   "Custom arguments are empty; ByeDPI keeps running with the previous method. Enter arguments and press Apply."))
+            return
+        }
+        let newTokens = ByeDPIArguments.build(from: args(for: currentPreset), host: host, port: port)
+        if !isExternallyStarted, let runningTokens, runningTokens == newTokens {
+            // Aynı argümanlar: yeniden başlatmaya gerek yok
+            runningPreset = currentPreset
+            return
+        }
+        Task { await restart() }
+    }
+
+    // MARK: - Başlat / Durdur
+
+    /// ByeDPI'ı seçili preset ile başlatır. Hatalarda uyarı penceresi gösterir.
+    @discardableResult
+    func start() async -> Bool {
+        // LAN'a açık eski bir ciadpi "çalışıyor" sayılmaz: güvenli şekilde yeniden başlatılmalı
+        if isRunning && !isExposedToNetwork { return true }
+        guard !isProcessing else { return false }
+        isProcessing = true
+        defer { isProcessing = false }
+        return await performStart(allowCleanupRetry: true)
+    }
+
+    /// Kullanıcı ByeDPI'ı durdurur; bizim sistem proxy'miz açıksa o da kapatılır.
+    func stop() async {
+        guard !isProcessing else { return }
+        isProcessing = true
+        setStatus(.info, LT("ByeDPI durduruluyor...", "Stopping ByeDPI..."))
+        let remaining = await stopAllOwnedProcesses()
+        markStopped()
         isProcessing = false
+
+        if remaining.isEmpty {
+            setStatus(.success, LT("ByeDPI durduruldu.", "ByeDPI stopped."))
+        } else {
+            isRunning = true
+            isExternallyStarted = true
+            setStatus(.warning, LT("\(port) portunu kullanan bir ciadpi süreci kapatılamadı (başka bir kullanıcıya ait olabilir). 'Tümünü Zorla Kapat' seçeneğini deneyin.",
+                                  "A ciadpi process using port \(port) could not be stopped (it may belong to another user). Try 'Force stop all'."))
+        }
+        await disableSystemProxyAfterStop()
     }
 
-    private func executeAppleScriptCommand(_ script: String) async throws {
-        var error: NSDictionary?
-        let appleScript = NSAppleScript(source: script)
-        appleScript?.executeAndReturnError(&error)
-
-        if let error = error {
-            throw NSError(
-                domain: "AppleScript",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: error.description]
+    /// Yeni preset için yeniden başlatma. Yeni yöntem başlatılamazsa önce eski yöntemle
+    /// yeniden açmayı dener; o da olmazsa sistem proxy'yi kapatır (ölü proxy = internet yok, #14).
+    func restart() async {
+        guard !isProcessing else { return }
+        isProcessing = true
+        setStatus(.info, LT("ByeDPI yeni yöntemle yeniden başlatılıyor...", "Restarting ByeDPI with the new method..."))
+        let previousTokens = isExternallyStarted ? nil : runningTokens
+        let previousPreset = runningPreset
+        _ = await stopAllOwnedProcesses()
+        markStopped()
+        var started = await performStart(allowCleanupRetry: true)
+        if !started, let previousTokens, !isShuttingDown {
+            let failure = status
+            do {
+                try await launchAndRecord(tokens: previousTokens, presetID: previousPreset)
+                started = true
+                let name = previousPreset.flatMap(ByeDPIPresets.preset(id:))?.localizedName
+                    ?? .verbatim(ByeDPIArguments.displayString(previousTokens))
+                setStatus(.warning, LT("Yeni yöntem başlatılamadı; ByeDPI önceki yöntemle (\(name.tr)) çalışmaya devam ediyor.",
+                                       "The new method could not be started; ByeDPI keeps running with the previous method (\(name.en))."))
+            } catch {
+                status = failure
+            }
+        }
+        isProcessing = false
+        if !started {
+            await disableSystemProxyAfterStop(
+                prefix: LT("ByeDPI yeni yöntemle başlatılamadı ve şu an çalışmıyor.",
+                           "ByeDPI could not start with the new method and is not running.")
             )
         }
     }
 
-    func startWithDiscord() async {
-        await start()
+    /// Tüm ciadpi süreçlerini zorla kapatır (gerekirse tek yönetici penceresi ile),
+    /// bizim sistem proxy'miz açıksa aynı pencerede kapatır.
+    func killAllProcesses() async {
+        guard !isProcessing else { return }
+        isProcessing = true
+        setStatus(.info, LT("Tüm ByeDPI süreçleri zorla kapatılıyor...", "Force stopping all ByeDPI processes..."))
 
-        if isRunning {
-            // Wait a moment for proxy to be ready
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        await terminateOwnProcess()
+        _ = try? await Shell.run("/usr/bin/pkill", ["-9", "-x", "ciadpi"], timeout: 10)
+        try? await Task.sleep(nanoseconds: 300_000_000)
 
-            // Launch Discord with proxy
+        let remaining = await Self.listeners(port: port).filter(\.isCiadpi)
+        let proxyServices = await systemProxy.refresh()
+
+        var privilegedParts: [String] = []
+        if !remaining.isEmpty {
+            privilegedParts.append("/usr/bin/pkill -9 -x ciadpi || true")
+        }
+        if !proxyServices.isEmpty {
+            privilegedParts.append(SystemProxyService.disableCommand(services: proxyServices))
+        }
+
+        var proxyWarning: LocalizedText?
+        if !privilegedParts.isEmpty {
             do {
-                try await launchDiscordWithProxy()
-                await showAlert(
-                    title: "Discord Başlatıldı",
-                    message: "Discord uygulaması ByeDPI proxy ile başlatıldı."
+                try await Shell.runPrivileged(
+                    privilegedParts.joined(separator: " ; "),
+                    prompt: L("SplitWire-Turkey tüm ByeDPI (ciadpi) süreçlerini kapatmak ve gerekirse sistem proxy'sini kapatmak istiyor.",
+                              "SplitWire-Turkey wants to stop all ByeDPI (ciadpi) processes and turn off the system proxy if needed.")
                 )
+            } catch ShellError.userCancelled {
+                if !proxyServices.isEmpty {
+                    proxyWarning = Self.proxyStillActiveWarning
+                }
             } catch {
-                await showAlert(
-                    title: "Uyarı",
-                    message: "ByeDPI başlatıldı ancak Discord açılamadı. Discord'u manuel olarak şu komutla başlatın:\n\nopen -a Discord --args --proxy-server=socks5://127.0.0.1:1080"
-                )
+                let reason = error.localizedDescription
+                proxyWarning = LT("Yönetici komutu başarısız oldu: \(reason)",
+                                  "The administrator command failed: \(reason)")
             }
+            await systemProxy.refresh()
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+
+        let stillListening = await Self.listeners(port: port)
+        markStopped()
+        isProcessing = false
+
+        if let proxyWarning {
+            setStatus(.warning, LT("ByeDPI süreçleri kapatıldı. \(proxyWarning.tr)",
+                                   "ByeDPI processes stopped. \(proxyWarning.en)"))
+        } else if stillListening.contains(where: \.isCiadpi) {
+            isRunning = true
+            isExternallyStarted = true
+            setStatus(.warning, LT("Uyarı: Port \(port) hâlâ bir ciadpi süreci tarafından kullanılıyor.",
+                                  "Warning: port \(port) is still in use by a ciadpi process."))
+        } else if !proxyServices.isEmpty && !systemProxy.isOurProxyActive {
+            setStatus(.success, LT("Tüm ByeDPI süreçleri kapatıldı ve sistem proxy kapatıldı.",
+                                   "All ByeDPI processes stopped and the system proxy was turned off."))
+        } else {
+            setStatus(.success, LT("Tüm ByeDPI süreçleri kapatıldı.", "All ByeDPI processes stopped."))
         }
     }
 
-    func startWithApp(appPath: String, appName: String, customArgs: String? = nil) async {
-        // Start ByeDPI if not already running
-        if !isRunning {
-            await start()
-        }
+    // MARK: - Çıkış
 
-        if isRunning {
-            // Wait a moment for proxy to be ready
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-
-            // Launch app with proxy
-            do {
-                try await launchAppWithProxy(appPath: appPath, customArgs: customArgs)
-                await showAlert(
-                    title: "\(appName) Başlatıldı",
-                    message: "\(appName) uygulaması ByeDPI proxy ile başlatıldı."
-                )
-            } catch {
-                await showAlert(
-                    title: "Uyarı",
-                    message: "ByeDPI başlatıldı ancak \(appName) açılamadı.\n\nHata: \(error.localizedDescription)"
-                )
-            }
+    /// Uygulama kapanırken: bizim sistem proxy'yi kapatır, sonra kendi ciadpi sürecimizi öldürür.
+    /// Proxy kapatılamazsa ciadpi'ye DOKUNMAZ ve `.proxyStillOn` döner (çağıran kullanıcıya sorar):
+    /// aksi hâlde proxy ölü bir 127.0.0.1:1080'i gösterir ve internet çalışmaz (#14).
+    func prepareForQuit() async -> QuitPreparation {
+        isShuttingDown = true
+        stopMonitoring()
+        // Açık bir "proxy'yi aç" parola penceresi varsa sonucunu bekle (en çok ~60 sn)
+        let deadline = Date().addingTimeInterval(60)
+        while systemProxy.isBusy && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 200_000_000)
         }
+        let services = await systemProxy.refresh()
+        guard !services.isEmpty else {
+            await terminateOwnProcess()
+            return .clean
+        }
+        setStatus(.info, LT("Çıkmadan önce sistem proxy kapatılıyor...", "Turning off the system proxy before quitting..."))
+        return await retryDisableProxyForQuit()
     }
 
-    func configureSystemProxy(enable: Bool) async {
+    /// Çıkışta proxy'yi (yeniden) kapatmayı dener; başarılıysa ciadpi'yi durdurur.
+    func retryDisableProxyForQuit() async -> QuitPreparation {
+        var reason = ""
         do {
-            let interface = try await getPrimaryInterface()
+            try await systemProxy.disableAll(prompt: Self.quitPrompt, timeout: 120)
+        } catch {
+            reason = error.localizedDescription
+        }
+        let still = await systemProxy.refresh()
+        guard !still.isEmpty else {
+            await terminateOwnProcess()
+            return .clean
+        }
+        if reason.isEmpty {
+            reason = L("ayar hâlâ açık", "the setting is still on")
+        }
+        return .proxyStillOn(services: still, reason: reason)
+    }
 
-            if enable {
-                // Set SOCKS proxy
-                let script = """
-                do shell script "networksetup -setsocksfirewallproxy '\(interface)' 127.0.0.1 1080 && networksetup -setsocksfirewallproxystate '\(interface)' on" with administrator privileges
-                """
+    /// Kullanıcı "Çıkma"yı seçti: izlemeyi yeniden başlat.
+    func resumeAfterCancelledQuit() {
+        isShuttingDown = false
+        startMonitoring()
+        Task { await refreshStatus() }
+    }
 
-                try await executeAppleScript(script)
-                isSystemProxyEnabled = true
-                statusMessage = "Sistem proxy ayarlandı (127.0.0.1:1080)"
+    static var quitPrompt: String {
+        L("SplitWire-Turkey kapanıyor ve internet bağlantınızın çalışmaya devam etmesi için sistem proxy'sini kapatması gerekiyor.",
+          "SplitWire-Turkey is quitting and needs to turn off the system proxy so your internet keeps working.")
+    }
 
-                await showAlert(
-                    title: "Başarılı",
-                    message: "Sistem SOCKS proxy ayarları yapılandırıldı.\n\nTüm uygulamalar artık ByeDPI üzerinden bağlanacak."
-                )
+    // MARK: - Sistem proxy
+
+    static var proxyStillActiveWarning: LocalizedText {
+        LT("Sistem proxy hâlâ AÇIK ve durdurulmuş ByeDPI'ı (127.0.0.1:1080) gösteriyor; bu durumda internet ÇALIŞMAZ. 'Sistem Proxy' bölümünden kapatın veya ByeDPI'ı yeniden başlatın.",
+           "The system proxy is still ON and points to the stopped ByeDPI (127.0.0.1:1080), so the internet will NOT work. Turn it off in the 'System proxy' section or restart ByeDPI.")
+    }
+
+    /// Sistem SOCKS proxy'yi açar (ByeDPI çalışıyor olmalı).
+    func enableSystemProxy() async {
+        guard isRunning else {
+            setStatus(.error, LT("Sistem proxy'yi açmadan önce ByeDPI'ı başlatın.",
+                                 "Start ByeDPI before turning on the system proxy."))
+            return
+        }
+        do {
+            let service = try await systemProxy.enable()
+            // Parola penceresi açıkken ByeDPI durdu/çöktü ya da çıkış başladı: proxy'yi açık bırakma
+            guard isRunning, !isShuttingDown else {
+                if !isShuttingDown {
+                    setStatus(.warning, Self.proxyStillActiveWarning)
+                    await disableSystemProxyAfterStop()
+                }
+                return
+            }
+            setStatus(.success, LT("Sistem proxy açıldı (\(service) → \(proxyAddress)). Yalnızca ByeDPI çalışırken güvenlidir; ByeDPI durdurulduğunda veya uygulamadan çıkıldığında otomatik kapatılır.",
+                                   "System proxy turned on (\(service) → \(proxyAddress)). It is only safe while ByeDPI is running; it turns off automatically when ByeDPI stops or you quit the app."))
+        } catch SystemProxyError.noListener {
+            setStatus(.warning, LT("ByeDPI, sistem proxy açılmadan önce durdu; proxy açılmadı.",
+                                   "ByeDPI stopped before the system proxy could be turned on; it was not turned on."))
+        } catch ShellError.userCancelled {
+            setStatus(.info, LT("Sistem proxy açılmadı (yönetici izni verilmedi).",
+                                "The system proxy was not turned on (administrator permission was not given)."))
+        } catch {
+            let reason = error.localizedDescription
+            setStatus(.error, LT("Sistem proxy açılamadı: \(reason)", "Could not turn on the system proxy: \(reason)"))
+            presentAlert(title: L("Hata", "Error"),
+                         message: L("Sistem proxy açılamadı:\n\(reason)", "Could not turn on the system proxy:\n\(reason)"),
+                         style: .warning)
+        }
+    }
+
+    /// Bizim proxy'nin açık olduğu tüm servislerde kapatır.
+    func disableSystemProxy() async {
+        do {
+            let services = try await systemProxy.disableAll()
+            if services.isEmpty {
+                setStatus(.info, LT("Sistem proxy zaten kapalı.", "The system proxy is already off."))
             } else {
-                // Disable SOCKS proxy
-                let script = """
-                do shell script "networksetup -setsocksfirewallproxystate '\(interface)' off" with administrator privileges
-                """
-
-                try await executeAppleScript(script)
-                isSystemProxyEnabled = false
-                statusMessage = "Sistem proxy kapatıldı"
+                let list = services.joined(separator: ", ")
+                setStatus(.success, LT("Sistem proxy kapatıldı (\(list)).", "System proxy turned off (\(list))."))
+            }
+        } catch ShellError.userCancelled {
+            if systemProxy.isOurProxyActive && !isRunning {
+                setStatus(.warning, Self.proxyStillActiveWarning)
+            } else {
+                setStatus(.info, LT("Sistem proxy kapatılmadı (yönetici izni verilmedi).",
+                                    "The system proxy was not turned off (administrator permission was not given)."))
             }
         } catch {
-            await showAlert(
-                title: "Hata",
-                message: "Proxy ayarları yapılandırılamadı: \(error.localizedDescription)"
-            )
+            let reason = error.localizedDescription
+            setStatus(.error, LT("Sistem proxy kapatılamadı: \(reason)", "Could not turn off the system proxy: \(reason)"))
         }
     }
 
-    func checkSystemProxyStatus() async {
+    /// ByeDPI artık çalışmıyorsa ve bizim proxy açıksa kapatır (#14).
+    /// - Parameter prefix: Mesajın başı (neden durduğu).
+    private func disableSystemProxyAfterStop(
+        prefix: LocalizedText = LT("ByeDPI durduruldu.", "ByeDPI stopped.")
+    ) async {
+        let services = await systemProxy.refresh()
+        guard !services.isEmpty, !isRunning else { return }
         do {
-            let interface = try await getPrimaryInterface()
-            let output = try await executeShellCommand("networksetup -getsocksfirewallproxy '\(interface)'")
-
-            // Check if enabled and pointing to our proxy
-            let isEnabled = output.contains("Enabled: Yes")
-            let hasCorrectServer = output.contains("Server: 127.0.0.1") && output.contains("Port: 1080")
-
-            isSystemProxyEnabled = isEnabled && hasCorrectServer
+            try await systemProxy.disableAll()
+            setStatus(.success, LT("\(prefix.tr) Sistem proxy de kapatıldı (ByeDPI kapalıyken internet bağlantısının kesilmemesi için).",
+                                   "\(prefix.en) The system proxy was turned off too, so your internet keeps working while ByeDPI is off."))
+        } catch ShellError.userCancelled {
+            let warning = Self.proxyStillActiveWarning
+            setStatus(.warning, LT("\(prefix.tr) Yönetici izni verilmediği için sistem proxy kapatılamadı. \(warning.tr)",
+                                   "\(prefix.en) The system proxy could not be turned off because administrator permission was not given. \(warning.en)"))
         } catch {
-            isSystemProxyEnabled = false
+            let reason = error.localizedDescription
+            let warning = Self.proxyStillActiveWarning
+            setStatus(.error, LT("\(prefix.tr) Sistem proxy kapatılamadı: \(reason). \(warning.tr)",
+                                 "\(prefix.en) The system proxy could not be turned off: \(reason). \(warning.en)"))
         }
     }
 
-    func checkByeDPIStatus() async {
-        // Check if port 1080 is in use (indicates ByeDPI is running)
-        do {
-            let result = try await executeShellCommand("lsof -i :1080 2>/dev/null | grep -c ciadpi || echo 0")
-            let count = Int(result.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-            let isCurrentlyRunning = count > 0
+    /// ciadpi beklenmedik şekilde durduysa ve bizim proxy açıksa kullanıcıya sor.
+    private func handleUnexpectedStop(details: String?) async {
+        guard !isShowingUnexpectedStopAlert, !isShuttingDown else { return }
+        let services = await systemProxy.refresh()
+        guard !services.isEmpty, !isRunning, !isShuttingDown else { return }
 
-            if isCurrentlyRunning != isRunning {
-                isRunning = isCurrentlyRunning
+        isShowingUnexpectedStopAlert = true
+        defer { isShowingUnexpectedStopAlert = false }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = L("ByeDPI beklenmedik şekilde durdu", "ByeDPI stopped unexpectedly")
+        let list = services.joined(separator: ", ")
+        var info = L("ByeDPI beklenmedik şekilde durdu, ancak sistem proxy hâlâ açık (\(list) → \(proxyAddress)). ByeDPI çalışmazken internet bağlantınız çalışmaz.\n\nByeDPI'ı yeniden başlatın veya sistem proxy'yi kapatın.",
+                     "ByeDPI stopped unexpectedly, but the system proxy is still on (\(list) → \(proxyAddress)). Your internet connection won't work while ByeDPI isn't running.\n\nRestart ByeDPI or turn off the system proxy.")
+        if let details, !details.isEmpty {
+            info += L("\n\nciadpi çıktısı:\n\(details)", "\n\nciadpi output:\n\(details)")
+        }
+        alert.informativeText = info
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: L("Yeniden Başlat", "Restart"))
+        alert.addButton(withTitle: L("Sistem Proxy'yi Kapat", "Turn off system proxy"))
+        alert.addButton(withTitle: L("Yoksay", "Ignore"))
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            await start()
+        case .alertSecondButtonReturn:
+            await disableSystemProxy()
+        default:
+            setStatus(.warning, Self.proxyStillActiveWarning)
+        }
+    }
+
+    // MARK: - Favori uygulamalar
+
+    /// ByeDPI'ı (gerekirse) başlatır ve uygulamayı proxy argümanlarıyla açar.
+    func launchFavoriteApp(_ app: AppState.FavoriteApp) async {
+        if !isRunning {
+            guard await start() else { return }
+            // Proxy'nin dinlemeye başlaması için kısa pay
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+        let arguments = ByeDPIArguments.tokenize(app.customArgs)
+        do {
+            let launched = try await AppLauncher.launch(
+                appPath: app.path,
+                name: app.name,
+                bundleIdentifier: app.bundleIdentifier,
+                arguments: arguments
+            )
+            if launched {
+                setStatus(.success, LT("\(app.name) ByeDPI proxy ile başlatıldı.",
+                                       "\(app.name) was launched with the ByeDPI proxy."))
+            } else {
+                setStatus(.info, LT("\(app.name) başlatma iptal edildi.",
+                                    "Launching \(app.name) was cancelled."))
             }
         } catch {
-            // Silently fail
+            let reason = error.localizedDescription
+            // AppLaunchError metinleri zaten uygulama adını/yolunu içerir (çift "başlatılamadı" olmasın)
+            let message = error is AppLaunchError
+                ? LocalizedText.verbatim(reason)
+                : LT("\(app.name) başlatılamadı: \(reason)", "Could not launch \(app.name): \(reason)")
+            setStatus(.error, message)
+            presentAlert(title: L("Hata", "Error"), message: reason, style: .warning)
         }
     }
 
-    func toggleSystemProxy() async {
-        await checkSystemProxyStatus()
-        await configureSystemProxy(enable: !isSystemProxyEnabled)
+    // MARK: - Süreç yönetimi
+
+    private func performStart(allowCleanupRetry: Bool) async -> Bool {
+        let presetID = currentPreset
+        let argsText = args(for: presetID)
+        setStatus(.info, LT("ByeDPI başlatılıyor...", "Starting ByeDPI..."))
+
+        do {
+            if presetID == ByeDPIPresets.customID,
+               ByeDPIArguments.tokenize(argsText).isEmpty {
+                throw ByeDPIError.emptyCustomArgs
+            }
+            let tokens = ByeDPIArguments.build(from: argsText, host: host, port: port)
+            try await launchAndRecord(tokens: tokens, presetID: presetID)
+            let presetName = ByeDPIPresets.preset(id: presetID)?.localizedName ?? .verbatim(presetID)
+            setStatus(.success, LT("ByeDPI başlatıldı (SOCKS5: \(proxyAddress), yöntem: \(presetName.tr)).",
+                                   "ByeDPI started (SOCKS5: \(proxyAddress), method: \(presetName.en))."))
+            return true
+        } catch ByeDPIError.portInUseByCiadpi(_, let pids) where allowCleanupRetry {
+            setStatus(.warning, LT("Port \(port) başka bir ByeDPI süreci tarafından kullanılıyor.",
+                                  "Port \(port) is in use by another ByeDPI process."))
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = L("Port \(port) Kullanımda", "Port \(port) is in use")
+            alert.informativeText = L("Port \(port) zaten başka bir ByeDPI (ciadpi) süreci tarafından kullanılıyor (önceki bir oturumdan kalmış olabilir).\n\nBu süreçleri kapatıp tekrar denemek ister misiniz?",
+                                      "Port \(port) is already in use by another ByeDPI (ciadpi) process (it may be left over from a previous session).\n\nStop these processes and try again?")
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L("Süreçleri Kapat ve Tekrar Dene", "Stop processes and retry"))
+            alert.addButton(withTitle: L("İptal", "Cancel"))
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                setStatus(.info, LT("Başlatma iptal edildi.", "Start cancelled."))
+                return false
+            }
+            setStatus(.info, LT("Eski ByeDPI süreçleri kapatılıyor...", "Stopping old ByeDPI processes..."))
+            let remaining = await killCiadpiListeners(pids: pids)
+            guard remaining.isEmpty else {
+                let message = LT("Port \(port) hâlâ kullanımda. 'Tümünü Zorla Kapat' seçeneğini deneyin.",
+                                 "Port \(port) is still in use. Try 'Force stop all'.")
+                setStatus(.error, message)
+                presentAlert(title: L("Hata", "Error"), message: message.resolved, style: .warning)
+                return false
+            }
+            return await performStart(allowCleanupRetry: false)
+        } catch {
+            let reason = error.localizedDescription
+            setStatus(.error, LT("ByeDPI başlatılamadı: \(reason)", "Could not start ByeDPI: \(reason)"))
+            presentAlert(title: L("ByeDPI başlatılamadı", "Could not start ByeDPI"), message: reason, style: .warning)
+            return false
+        }
     }
 
-    // MARK: - Private Methods
+    /// ciadpi'yi verilen argümanlarla başlatır ve çalışan durumu kaydeder.
+    private func launchAndRecord(tokens: [String], presetID: String?) async throws {
+        try await launchProcess(tokens: tokens)
+        isRunning = true
+        isExternallyStarted = false
+        if isExposedToNetwork { isExposedToNetwork = false }
+        runningTokens = tokens
+        runningArgs = ByeDPIArguments.displayString(tokens)
+        runningPreset = presetID
+    }
 
-    private func startByeDPI(args: String) async throws {
-        guard FileManager.default.fileExists(atPath: ciadpiPath) else {
-            throw NSError(
-                domain: "ByeDPIService",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "ciadpi binary bulunamadı: \(ciadpiPath)"]
-            )
+    /// ciadpi sürecini verilen (son hâli oluşturulmuş) argümanlarla başlatır.
+    private func launchProcess(tokens: [String]) async throws {
+        guard let ciadpiPath = ciadpiPathOverride ?? Self.findCiadpiPath() else {
+            throw ByeDPIError.binaryNotFound
         }
 
-        // Check if port 1080 is already in use
-        let portCheckResult = try? await executeShellCommand("lsof -i :1080")
-        if let portCheck = portCheckResult, !portCheck.isEmpty {
-            throw NSError(
-                domain: "ByeDPIService",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Port 1080 zaten kullanımda!\n\nDiğer ByeDPI/SOCKS5 proxy'leri kapatın veya şu komutu çalıştırın:\npkill -f ciadpi"]
-            )
+        // Port kontrolü: yalnızca LISTEN soketleri sayılır
+        let listeners = await Self.listeners(port: port)
+        if !listeners.isEmpty {
+            let uid = getuid()
+            let ownCiadpi = listeners.filter { $0.isCiadpi && ($0.uid == nil || $0.uid == uid) }
+            if ownCiadpi.count == listeners.count {
+                throw ByeDPIError.portInUseByCiadpi(port: port, pids: ownCiadpi.map(\.pid))
+            }
+            let other = listeners.first { !($0.isCiadpi && ($0.uid == nil || $0.uid == uid)) } ?? listeners[0]
+            throw ByeDPIError.portInUseByOther(port: port, command: other.command.isEmpty ? "?" : other.command, pid: other.pid)
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ciadpiPath)
+        process.arguments = tokens
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
 
-        // Parse arguments
-        let argArray = args.split(separator: " ").map(String.init)
-        process.arguments = argArray
-
-        print("🚀 Starting ByeDPI: \(ciadpiPath) \(argArray.joined(separator: " "))")
-
-        // Set up pipes for output
-        let outputPipe = Pipe()
+        let buffer = LineRingBuffer(capacity: 50)
+        stderrBuffer = buffer
         let errorPipe = Pipe()
-        process.standardOutput = outputPipe
         process.standardError = errorPipe
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                buffer.append(data)
+            }
+        }
+        process.terminationHandler = { [weak self] proc in
+            let pid = proc.processIdentifier
+            let status = proc.terminationStatus
+            Task { @MainActor in
+                self?.handleTermination(pid: pid, status: status)
+            }
+        }
+
+        let commandLine = ([ciadpiPath] + tokens).joined(separator: " ")
+        isStarting = true
+        defer { isStarting = false }
 
         do {
             try process.run()
-            self.process = process
+        } catch {
+            errorPipe.fileHandleForReading.readabilityHandler = nil
+            throw ByeDPIError.launchFailed(error.localizedDescription)
+        }
+        self.process = process
 
-            print("🚀 Process started with PID: \(process.processIdentifier)")
-
-            // Background task to read output (non-blocking)
-            Task.detached {
-                let outputHandle = outputPipe.fileHandleForReading
-                let errorHandle = errorPipe.fileHandleForReading
-
-                // Read output in background without blocking
-                DispatchQueue.global(qos: .background).async {
-                    while true {
-                        let outData = outputHandle.availableData
-                        if !outData.isEmpty {
-                            if let output = String(data: outData, encoding: .utf8) {
-                                print("ByeDPI stdout: \(output)")
-                            }
-                        }
-
-                        let errData = errorHandle.availableData
-                        if !errData.isEmpty {
-                            if let error = String(data: errData, encoding: .utf8) {
-                                print("ByeDPI stderr: \(error)")
-                            }
-                        }
-
-                        Thread.sleep(forTimeInterval: 0.1)
-                    }
-                }
-            }
-
-            // Give it a moment to start and check for immediate failures
-            try await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-
-            // Check if still running
-            if !process.isRunning {
-                // Try to read any error output (non-blocking)
-                let errorData = try? errorPipe.fileHandleForReading.availableData
-                let outputData = try? outputPipe.fileHandleForReading.availableData
-
-                var errorMessage = "ByeDPI başlatılamadı (process durdu)"
-
-                if let errorData = errorData, !errorData.isEmpty,
-                   let errorOutput = String(data: errorData, encoding: .utf8), !errorOutput.isEmpty {
-                    errorMessage += "\n\nHata çıktısı:\n\(errorOutput)"
-                }
-
-                if let outputData = outputData, !outputData.isEmpty,
-                   let stdOutput = String(data: outputData, encoding: .utf8), !stdOutput.isEmpty {
-                    errorMessage += "\n\nÇıktı:\n\(stdOutput)"
-                }
-
-                errorMessage += "\n\nKomut: \(ciadpiPath) \(argArray.joined(separator: " "))"
-                errorMessage += "\n\nTermination Status: \(process.terminationStatus)"
-
-                throw NSError(
-                    domain: "ByeDPIService",
-                    code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: errorMessage]
-                )
-            }
-
-            print("✅ ByeDPI started successfully with PID \(process.processIdentifier)")
-
-        } catch let error as NSError {
-            if error.domain == "ByeDPIService" {
-                throw error
-            }
-            throw NSError(
-                domain: "ByeDPIService",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Process başlatma hatası: \(error.localizedDescription)"]
-            )
+        // Hemen kapanan (ör. geçersiz parametre, bind hatası) süreçleri yakala
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        if !process.isRunning {
+            self.process = nil
+            // stderr'in son parçası gelsin
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            throw ByeDPIError.exitedEarly(status: process.terminationStatus, stderr: buffer.text, command: commandLine)
         }
     }
 
-    private func launchDiscordWithProxy() async throws {
-        let discordPath = "/Applications/Discord.app/Contents/MacOS/Discord"
+    private func handleTermination(pid: Int32, status: Int32) {
+        if requestedStopPIDs.remove(pid) != nil { return }
+        guard let process, process.processIdentifier == pid else { return }
+        // Başlatma sırasında erken çıkış performStart tarafından raporlanır
+        guard !isStarting, !isShuttingDown else { return }
 
-        guard FileManager.default.fileExists(atPath: discordPath) else {
-            throw NSError(
-                domain: "ByeDPIService",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Discord bulunamadı"]
-            )
-        }
+        self.process = nil
+        isRunning = false
+        isExternallyStarted = false
+        runningArgs = nil
+        runningPreset = nil
+        runningTokens = nil
 
-        let command = "open -a '\(discordPath)' --args --proxy-server=socks5://127.0.0.1:1080 --ignore-certificate-errors"
-        _ = try await executeShellCommand(command)
+        let tail = stderrBuffer.text
+        let suffix = tail.isEmpty ? "" : "\n\(tail)"
+        setStatus(.error, LT("ByeDPI beklenmedik şekilde durdu (çıkış kodu \(status)).\(suffix)",
+                             "ByeDPI stopped unexpectedly (exit code \(status)).\(suffix)"))
+        Task { await handleUnexpectedStop(details: tail) }
     }
 
-    private func launchAppWithProxy(appPath: String, customArgs: String? = nil) async throws {
-        guard FileManager.default.fileExists(atPath: appPath) else {
-            throw NSError(
-                domain: "ByeDPIService",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Uygulama bulunamadı: \(appPath)"]
-            )
-        }
-
-        // Check if it's a .app bundle
-        if appPath.hasSuffix(".app") {
-            // Use custom args if provided, otherwise use default proxy args
-            let args = customArgs ?? "--proxy-server=socks5://127.0.0.1:1080"
-            let command = "open -a '\(appPath)' --args \(args)"
-            _ = try await executeShellCommand(command)
-        } else {
-            // For executables, just open
-            let command = "open '\(appPath)'"
-            _ = try await executeShellCommand(command)
+    /// Kendi sürecimizi öldürür (ciadpi SIGTERM'i yok saydığından SIGKILL).
+    private func terminateOwnProcess() async {
+        guard let process else { return }
+        self.process = nil
+        let pid = process.processIdentifier
+        guard process.isRunning else { return }
+        requestedStopPIDs.insert(pid)
+        process.terminate()
+        if !(await Self.waitForExit(process, timeout: 0.3)) {
+            kill(pid, SIGKILL)
+            _ = await Self.waitForExit(process, timeout: 2)
         }
     }
 
-    private func getPrimaryInterface() async throws -> String {
-        let output = try await executeShellCommand("route -n get default | grep interface | awk '{print $2}'")
-        let interface = output.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if interface.isEmpty {
-            return "Wi-Fi" // fallback
+    /// Kendi sürecimiz + 1080'de dinleyen (aynı kullanıcıya ait) ciadpi'leri öldürür.
+    /// - Returns: Hâlâ 1080'de dinleyen ciadpi'ler.
+    private func stopAllOwnedProcesses() async -> [PortListener] {
+        await terminateOwnProcess()
+        let uid = getuid()
+        let orphans = await Self.listeners(port: port).filter {
+            $0.isCiadpi && ($0.uid == nil || $0.uid == uid)
         }
-
-        // Convert interface name to service name (e.g., en0 -> Wi-Fi)
-        let serviceOutput = try await executeShellCommand("networksetup -listallhardwareports | grep -B 1 '\(interface)' | head -1 | awk -F': ' '{print $2}'")
-        let serviceName = serviceOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return serviceName.isEmpty ? "Wi-Fi" : serviceName
+        if orphans.isEmpty {
+            return await Self.listeners(port: port).filter(\.isCiadpi)
+        }
+        return await killCiadpiListeners(pids: orphans.map(\.pid))
     }
 
-    func executeShellCommand(_ command: String) async throws -> String {
-        let task = Process()
-        let pipe = Pipe()
-
-        task.standardOutput = pipe
-        task.standardError = pipe
-        task.arguments = ["-c", command]
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-
-        try task.run()
-        task.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-
-        if task.terminationStatus != 0 {
-            throw NSError(
-                domain: "ShellCommand",
-                code: Int(task.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: output]
-            )
+    /// Verilen ciadpi PID'lerini SIGKILL ile öldürür ve portun boşalmasını bekler.
+    private func killCiadpiListeners(pids: [Int32]) async -> [PortListener] {
+        for pid in pids where pid > 0 {
+            kill(pid, SIGKILL)
         }
-
-        return output
+        var remaining: [PortListener] = []
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            remaining = await Self.listeners(port: port).filter(\.isCiadpi)
+            if remaining.isEmpty { break }
+        }
+        return remaining
     }
 
-    private func executeAppleScript(_ script: String) async throws {
-        var error: NSDictionary?
-        let appleScript = NSAppleScript(source: script)
-        appleScript?.executeAndReturnError(&error)
-
-        if let error = error {
-            throw NSError(
-                domain: "AppleScript",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: error.description]
-            )
-        }
+    private func markStopped() {
+        isRunning = false
+        isExternallyStarted = false
+        isExposedToNetwork = false
+        runningArgs = nil
+        runningPreset = nil
+        runningTokens = nil
     }
 
-    private func showAlert(title: String, message: String) async {
+    // MARK: - Yardımcılar
+
+    private func setStatus(_ kind: ByeDPIStatusKind, _ message: LocalizedText) {
+        statusKind = kind
+        status = message
+    }
+
+    private func presentAlert(title: String, message: String, style: NSAlert.Style) {
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.alertStyle = title == "Hata" || title == "Uyarı" ? .warning : .informational
-        alert.addButton(withTitle: "Tamam")
+        alert.alertStyle = style
+        alert.addButton(withTitle: L("Tamam", "OK"))
+        alert.runModal()
+    }
 
-        if message.contains("open -a Discord") {
-            alert.addButton(withTitle: "Kopyala")
-            let response = alert.runModal()
-            if response == .alertSecondButtonReturn {
-                // Copy command to clipboard
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString("open -a Discord --args --proxy-server=socks5://127.0.0.1:1080", forType: .string)
-            }
-        } else {
-            alert.runModal()
+    private static func waitForExit(_ process: Process, timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
+        return !process.isRunning
+    }
+
+    /// `port` üzerinde LISTEN durumundaki süreçler.
+    nonisolated static func listeners(port: Int) async -> [PortListener] {
+        guard let result = try? await Shell.run(
+            "/usr/sbin/lsof",
+            ["-nP", "+c", "0", "-iTCP:\(port)", "-sTCP:LISTEN", "-F", "pcun"],
+            timeout: 10
+        ) else { return [] }
+        return LsofParser.parseListeners(result.stdout)
+    }
+
+    nonisolated static func commandLine(of pid: Int32) async -> String? {
+        guard let result = try? await Shell.run("/bin/ps", ["-o", "args=", "-p", String(pid)], timeout: 5),
+              result.succeeded else { return nil }
+        let line = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return line.isEmpty ? nil : line
+    }
+
+    /// ciadpi ikili dosyasını bulur: uygulama paketi (Contents/Resources/bin/ciadpi) →
+    /// geliştirme yolu (<repo>/byedpi/ciadpi, scripts/build-ciadpi.sh ile derlenir).
+    /// Not: SwiftPM `*.bundle` klasörleri taranmaz; eski bir .build içinde v1.0.0'dan kalma
+    /// (minos 15.0, yalnızca arm64) bir ciadpi bulunabilir.
+    nonisolated static func findCiadpiPath() -> String? {
+        let fm = FileManager.default
+        var candidates: [String] = []
+
+        if let resources = Bundle.main.resourceURL {
+            candidates.append(resources.appendingPathComponent("bin/ciadpi").path)
+            candidates.append(resources.appendingPathComponent("ciadpi").path)
+        }
+
+        if let execURL = Bundle.main.executableURL {
+            // Geliştirme: <repo>/.build/<config>/ veya <repo>/.build/out/Products/<config>/ → <repo>
+            var dir = execURL.deletingLastPathComponent()
+            for _ in 0..<5 {
+                dir = dir.deletingLastPathComponent()
+                candidates.append(dir.appendingPathComponent("byedpi/ciadpi").path)
+            }
+        }
+
+        return candidates.first { fm.isExecutableFile(atPath: $0) }
     }
 }

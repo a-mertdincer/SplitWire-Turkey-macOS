@@ -2,30 +2,33 @@ import Foundation
 import Combine
 
 class AppState: ObservableObject {
+    /// Uygulama genelindeki tek örnek (pencere ve menü çubuğu paylaşır).
+    static let shared = AppState()
+
     @Published var isLoading = false
     @Published var statusMessage = ""
     @Published var selectedTab = 1  // Default to ByeDPI tab
     @Published var isDarkMode = false
-    @Published var selectedLanguage: Language = .turkish
-
-    // WireGuard State
-    @Published var isWireGuardConfigured = false
-    @Published var wireGuardStatus = "Yapılandırılmadı"
-
-    // Service States
-    @Published var installedServices: [String] = []
-
-    // Folder customization
-    @Published var customFolders: [String] = []
-    @Published var includeBrowsers = false
+    /// Arayüz dili (#8). Değişince hemen kaydedilir, `L10n.current` güncellenir ve
+    /// `.appLanguageDidChange` yayınlanır (pencere yeniden kurulur, menü çubuğu yenilenir).
+    @Published var selectedLanguage: AppLanguage = L10n.current {
+        didSet {
+            if selectedLanguage != L10n.current {
+                L10n.current = selectedLanguage
+            }
+        }
+    }
 
     // Favorite Apps for Quick Actions
     @Published var favoriteApps: [FavoriteApp] = []
 
-    enum Language: String, CaseIterable {
-        case turkish = "Türkçe"
-        case english = "English"
-        case russian = "Русский"
+    /// Dock simgesini gizle (uygulama menü çubuğunda yaşamaya devam eder). #6
+    @Published var hideDockIcon = false {
+        didSet {
+            if hideDockIcon != oldValue {
+                UserDefaults.standard.set(hideDockIcon, forKey: "hideDockIcon")
+            }
+        }
     }
 
     struct FavoriteApp: Codable, Identifiable, Equatable {
@@ -44,9 +47,27 @@ class AppState: ObservableObject {
         }
     }
 
+    private var languageObserver: NSObjectProtocol?
+
     init() {
         loadSettings()
-        checkServices()
+
+        // L10n.current başka bir yerden değiştirilirse seçimi eşitle
+        languageObserver = NotificationCenter.default.addObserver(
+            forName: .appLanguageDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let language = L10n.current
+            if self.selectedLanguage != language {
+                self.selectedLanguage = language
+            }
+        }
+    }
+
+    deinit {
+        if let languageObserver {
+            NotificationCenter.default.removeObserver(languageObserver)
+        }
     }
 
     func loadSettings() {
@@ -54,13 +75,14 @@ class AppState: ObservableObject {
             isDarkMode = isDark
         }
 
-        if let langRaw = UserDefaults.standard.string(forKey: "language"),
-           let lang = Language(rawValue: langRaw) {
-            selectedLanguage = lang
-        }
+        // Dil L10n tarafından okunur/taşınır (eski "language" anahtarı → "appLanguage")
+        selectedLanguage = L10n.current
 
-        customFolders = UserDefaults.standard.stringArray(forKey: "customFolders") ?? []
-        includeBrowsers = UserDefaults.standard.bool(forKey: "includeBrowsers")
+        hideDockIcon = UserDefaults.standard.bool(forKey: "hideDockIcon")
+
+        // v1.0.0'ın hiçbir işe yaramayan WireGuard klasör/tarayıcı ayarları (#4): eski anahtarları temizle
+        UserDefaults.standard.removeObject(forKey: "customFolders")
+        UserDefaults.standard.removeObject(forKey: "includeBrowsers")
 
         // Load favorite apps
         if let data = UserDefaults.standard.data(forKey: "favoriteApps"),
@@ -76,9 +98,6 @@ class AppState: ObservableObject {
 
     func saveSettings() {
         UserDefaults.standard.set(isDarkMode, forKey: "isDarkMode")
-        UserDefaults.standard.set(selectedLanguage.rawValue, forKey: "language")
-        UserDefaults.standard.set(customFolders, forKey: "customFolders")
-        UserDefaults.standard.set(includeBrowsers, forKey: "includeBrowsers")
 
         // Save favorite apps
         if let data = try? JSONEncoder().encode(favoriteApps) {
@@ -108,39 +127,5 @@ class AppState: ObservableObject {
 
     func isFavorite(_ appPath: String) -> Bool {
         favoriteApps.contains { $0.path == appPath }
-    }
-
-    func checkServices() {
-        // Check WireGuard status
-        Task {
-            await checkWireGuardStatus()
-        }
-    }
-
-    @MainActor
-    func checkWireGuardStatus() async {
-        // Check if WireGuard is configured
-        let configPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/wireguard/wgcf.conf")
-
-        isWireGuardConfigured = FileManager.default.fileExists(atPath: configPath.path)
-        wireGuardStatus = isWireGuardConfigured ? "Yapılandırıldı" : "Yapılandırılmadı"
-    }
-
-    func addCustomFolder(_ folder: String) {
-        if !customFolders.contains(folder) {
-            customFolders.append(folder)
-            saveSettings()
-        }
-    }
-
-    func removeCustomFolder(_ folder: String) {
-        customFolders.removeAll { $0 == folder }
-        saveSettings()
-    }
-
-    func clearCustomFolders() {
-        customFolders.removeAll()
-        saveSettings()
     }
 }

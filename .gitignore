@@ -20,6 +20,15 @@ xcuserdata/
 # App bundle (we'll provide release builds separately)
 *.app/
 
+# Release build outputs (build.sh)
+/build/
+/dist/
+
+# ByeDPI build artifacts (scripts/build-ciadpi.sh / make in byedpi/)
+byedpi/*.o
+byedpi/ciadpi
+byedpi/ciadpi.exe
+
 # macOS
 .DS_Store
 .AppleDouble

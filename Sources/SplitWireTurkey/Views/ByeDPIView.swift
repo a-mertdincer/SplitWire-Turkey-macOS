@@ -2,311 +2,51 @@ import SwiftUI
 
 struct ByeDPIView: View {
     @EnvironmentObject var appState: AppState
-    @StateObject private var byedpiService = ByeDPIService()
-    @State private var showCustomArgs = false
+    @EnvironmentObject var byedpiService: ByeDPIService
+    @EnvironmentObject var systemProxy: SystemProxyService
     @State private var showSystemProxyInfo = false
     @State private var showAppPicker = false
     @State private var editingApp: AppState.FavoriteApp?
-    @State private var statusCheckTimer: Timer?
+
+    private var presetBinding: Binding<String> {
+        Binding(
+            get: { byedpiService.currentPreset },
+            set: { byedpiService.selectPreset($0) }
+        )
+    }
+
+    /// ByeDPI veya sistem proxy işlemi (parola penceresi dahil) sürüyor.
+    private var isBusy: Bool {
+        byedpiService.isProcessing || systemProxy.isBusy
+    }
+
+    private var isCustomSelected: Bool {
+        byedpiService.currentPreset == ByeDPIPresets.customID
+    }
+
+    /// Çalışan yöntemin görünen adı (id kalıcıdır, ad yerelleştirilebilir).
+    private var runningPresetDisplayName: String {
+        guard let id = byedpiService.runningPreset else {
+            return L("harici süreç", "external process")
+        }
+        return ByeDPIPresets.preset(id: id)?.name ?? id
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Status Section
-                GroupBox(label: Label("ByeDPI Durumu", systemImage: "network.badge.shield.half.filled")) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Durum:")
-                                .fontWeight(.semibold)
-                            Spacer()
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(byedpiService.isRunning ? Color.green : Color.red)
-                                    .frame(width: 8, height: 8)
-                                Text(byedpiService.isRunning ? "Çalışıyor" : "Durduruldu")
-                                    .foregroundColor(byedpiService.isRunning ? .green : .red)
-                            }
-                        }
-
-                        if byedpiService.isRunning {
-                            Divider()
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("SOCKS5 Proxy Adresi:")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                Text("127.0.0.1:1080")
-                                    .font(.system(.body, design: .monospaced))
-                                    .fontWeight(.medium)
-                            }
-                        }
-                    }
-                    .padding()
-                }
-
-                // Quick Actions - Customizable
-                GroupBox(label: HStack {
-                    Label("Hızlı İşlemler", systemImage: "bolt.fill")
-                    Spacer()
-                    Button(action: {
-                        showAppPicker = true
-                    }) {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Uygulama Ekle")
-                }) {
-                    VStack(spacing: 8) {
-                        // Favorite Apps Grid
-                        if !appState.favoriteApps.isEmpty {
-                            LazyVGrid(columns: [
-                                GridItem(.flexible()),
-                                GridItem(.flexible())
-                            ], spacing: 12) {
-                                ForEach(appState.favoriteApps) { app in
-                                    FavoriteAppButton(
-                                        app: app,
-                                        byedpiService: byedpiService,
-                                        onRemove: {
-                                            appState.removeFavoriteApp(app)
-                                        },
-                                        onEdit: {
-                                            editingApp = app
-                                        }
-                                    )
-                                }
-                            }
-                        } else {
-                            Text("Hızlı erişim için uygulama ekleyin")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                        }
-
-                        Divider()
-
-                        HStack(spacing: 12) {
-                            Button(action: {
-                                Task {
-                                    if byedpiService.isRunning {
-                                        await byedpiService.stop()
-                                    } else {
-                                        await byedpiService.start()
-                                    }
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: byedpiService.isRunning ? "stop.circle.fill" : "play.circle.fill")
-                                    Text(byedpiService.isRunning ? "Durdur" : "Başlat")
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(byedpiService.isRunning ? .red : .green)
-                            .disabled(byedpiService.isProcessing)
-
-                            Button(action: {
-                                Task {
-                                    await byedpiService.killAllProcesses()
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "xmark.octagon.fill")
-                                    Text("Tümünü Kapat")
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.red)
-                            .disabled(byedpiService.isProcessing)
-                            .help("Tüm ByeDPI process'lerini zorla kapat")
-                        }
-
-                        HStack(spacing: 12) {
-                            Button(action: {
-                                showSystemProxyInfo = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "network")
-                                    Text("Sistem Proxy")
-                                    if byedpiService.isSystemProxyEnabled {
-                                        Circle()
-                                            .fill(Color.green)
-                                            .frame(width: 8, height: 8)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(!byedpiService.isRunning)
-                        }
-                    }
-                    .padding()
-                }
-
-                // Preset Selection
-                GroupBox(label: Label("Önceden Hazır Ayarlar", systemImage: "list.bullet.rectangle")) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("DPI aşım yöntemi seçin:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Picker("Preset", selection: $byedpiService.currentPreset) {
-                            ForEach(Array(byedpiService.presets.keys.sorted()), id: \.self) { preset in
-                                Text(preset).tag(preset)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        if byedpiService.currentPreset != "Custom" {
-                            if let args = byedpiService.presets[byedpiService.currentPreset] {
-                                HStack {
-                                    Text("Parametreler:")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(args)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(8)
-                                .background(Color.secondary.opacity(0.1))
-                                .cornerRadius(6)
-                            }
-                        }
-
-                        // Custom Args
-                        if byedpiService.currentPreset == "Custom" || showCustomArgs {
-                            Divider()
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Özel Parametreler")
-                                        .font(.headline)
-                                    Spacer()
-                                    if !showCustomArgs && byedpiService.currentPreset != "Custom" {
-                                        Button("Gizle") {
-                                            showCustomArgs = false
-                                        }
-                                        .buttonStyle(.plain)
-                                        .foregroundColor(.blue)
-                                    }
-                                }
-
-                                TextEditor(text: $byedpiService.customArgs)
-                                    .font(.system(.body, design: .monospaced))
-                                    .frame(height: 80)
-                                    .border(Color.secondary.opacity(0.3), width: 1)
-                                    .cornerRadius(4)
-
-                                Text("Örnek: -r 1+s --disorder 1 --auto=torst")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else if byedpiService.currentPreset != "Custom" {
-                            Button(action: {
-                                showCustomArgs.toggle()
-                            }) {
-                                HStack {
-                                    Image(systemName: "pencil.circle")
-                                    Text("Özel Parametreler Düzenle")
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.blue)
-                        }
-                    }
-                    .padding()
-                }
-
-                // Information
-                GroupBox(label: Label("Nasıl Kullanılır?", systemImage: "questionmark.circle.fill")) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        InfoRow(
-                            icon: "1.circle.fill",
-                            title: "ByeDPI'ı Başlatın",
-                            description: "Yukarıdaki 'Başlat' butonuna tıklayın."
-                        )
-
-                        InfoRow(
-                            icon: "2.circle.fill",
-                            title: "Uygulama Ekleyin",
-                            description: "Hızlı İşlemler bölümündeki + butonuna tıklayarak favori uygulamalarınızı ekleyin."
-                        )
-
-                        InfoRow(
-                            icon: "3.circle.fill",
-                            title: "Uygulamayı Başlatın",
-                            description: "Eklediğiniz uygulamanın ikonuna tıklayarak otomatik olarak ByeDPI ile başlatın."
-                        )
-
-                        Divider()
-
-                        Text("**Not:** ByeDPI bir SOCKS5 proxy sunucusu oluşturur. Uygulamalar otomatik olarak bu proxy üzerinden çalışır.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                }
-
-                // Advanced Settings
-                GroupBox(label: Label("Gelişmiş", systemImage: "gearshape.2.fill")) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Discord Ayarları")
-                            .font(.headline)
-
-                        Text("Discord'un otomatik güncellemelerini devre dışı bırakmak için settings.json dosyasına şu satırları ekleyin:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\"SKIP_HOST_UPDATE\": true,")
-                                .font(.system(.caption, design: .monospaced))
-                            Text("\"SKIP_MODULE_UPDATE\": true")
-                                .font(.system(.caption, design: .monospaced))
-                        }
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(6)
-
-                        Button(action: {
-                            let settingsPath = "~/Library/Application Support/discord/settings.json"
-                            let command = "open -R '\(settingsPath)'"
-                            Task {
-                                try? await ByeDPIService().executeShellCommand(command)
-                            }
-                        }) {
-                            HStack {
-                                Image(systemName: "folder")
-                                Text("settings.json Klasörünü Aç")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding()
-                }
-
-                if byedpiService.isProcessing {
-                    ProgressView(byedpiService.statusMessage)
-                        .progressViewStyle(.linear)
-                }
-
-                if !byedpiService.statusMessage.isEmpty && !byedpiService.isProcessing {
-                    HStack {
-                        Image(systemName: byedpiService.statusMessage.contains("Hata") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                            .foregroundColor(byedpiService.statusMessage.contains("Hata") ? .red : .green)
-                        Text(byedpiService.statusMessage)
-                            .font(.caption)
-                    }
-                    .padding()
-                    .background(byedpiService.statusMessage.contains("Hata") ? Color.red.opacity(0.1) : Color.green.opacity(0.1))
-                    .cornerRadius(8)
-                }
+                DNSHealthBanner()
+                statusSection
+                quickActionsSection
+                presetSection
+                howToSection
+                advancedSection
+                statusMessageView
             }
             .padding()
         }
         .sheet(isPresented: $showSystemProxyInfo) {
-            SystemProxyConfigView(byedpiService: byedpiService)
+            SystemProxyConfigView(byedpiService: byedpiService, systemProxy: systemProxy)
         }
         .sheet(isPresented: $showAppPicker) {
             AppPickerView(appState: appState, isPresented: $showAppPicker)
@@ -317,36 +57,444 @@ struct ByeDPIView: View {
             })
         }
         .onAppear {
-            startStatusCheck()
-        }
-        .onDisappear {
-            stopStatusCheck()
-        }
-    }
-
-    private func startStatusCheck() {
-        // Initial check
-        Task {
-            await byedpiService.checkByeDPIStatus()
-        }
-
-        // Start periodic checking every 2 seconds
-        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            Task { @MainActor in
-                await byedpiService.checkByeDPIStatus()
+            Task {
+                await byedpiService.refreshStatus()
+                await systemProxy.refresh()
             }
         }
     }
 
-    private func stopStatusCheck() {
-        statusCheckTimer?.invalidate()
-        statusCheckTimer = nil
+    // MARK: - Bölümler
+
+    private var statusSection: some View {
+        GroupBox(label: Label(L("ByeDPI Durumu", "ByeDPI status"), systemImage: "network.badge.shield.half.filled")) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(L("Durum:", "Status:"))
+                        .fontWeight(.semibold)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(byedpiService.isRunning ? Color.green : Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(byedpiService.isRunning
+                             ? (byedpiService.isExternallyStarted
+                                ? L("Çalışıyor (harici süreç)", "Running (external process)")
+                                : L("Çalışıyor", "Running"))
+                             : L("Durduruldu", "Stopped"))
+                            .foregroundColor(byedpiService.isRunning ? .green : .red)
+                    }
+                }
+
+                if byedpiService.isRunning {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("SOCKS5 Proxy Adresi:", "SOCKS5 proxy address:"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(byedpiService.proxyAddress)
+                            .font(.system(.body, design: .monospaced))
+                            .fontWeight(.medium)
+                            .textSelection(.enabled)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Çalışan yöntem: \(runningPresetDisplayName)",
+                               "Active method: \(runningPresetDisplayName)"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if let args = byedpiService.runningArgs {
+                            Text(args)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.secondary.opacity(0.1))
+                                .cornerRadius(6)
+                        }
+                        if byedpiService.isExposedToNetwork {
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text(ByeDPIService.exposedWarning.resolved
+                                     + " " + L("Durdurup yeniden başlatın: yeni süreç yalnızca 127.0.0.1'de dinler.",
+                                               "Stop and start it again: the new process listens on 127.0.0.1 only."))
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        if byedpiService.isExternallyStarted {
+                            Text(L("Bu ciadpi süreci bu oturumda başlatılmadı (ör. önceki oturumdan kalmış). Seçili yöntemi uygulamak için durdurup yeniden başlatın.",
+                                   "This ciadpi process wasn't started in this session (e.g. it was left over from a previous session). Stop and start it again to apply the selected method."))
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+
+                if systemProxy.isOurProxyActive {
+                    Divider()
+                    if byedpiService.isRunning {
+                        HStack(spacing: 6) {
+                            Image(systemName: "network")
+                                .foregroundColor(.green)
+                            let services = systemProxy.activeServices.joined(separator: ", ")
+                            Text(L("Sistem proxy açık (\(services)). ByeDPI durdurulduğunda otomatik kapatılır.",
+                                   "System proxy is on (\(services)). It turns off automatically when ByeDPI stops."))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(L("Sistem proxy açık ama ByeDPI çalışmıyor — internet bağlantınız çalışmaz.",
+                                       "System proxy is on but ByeDPI isn't running — your internet connection won't work."))
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                HStack {
+                                    Button(L("Sistem Proxy'yi Kapat", "Turn off system proxy")) {
+                                        Task { await byedpiService.disableSystemProxy() }
+                                    }
+                                    .disabled(systemProxy.isBusy)
+                                    Button(L("ByeDPI'ı Başlat", "Start ByeDPI")) {
+                                        Task { await byedpiService.start() }
+                                    }
+                                    .disabled(byedpiService.isProcessing)
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.12))
+                        .cornerRadius(6)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    private var quickActionsSection: some View {
+        GroupBox(label: HStack {
+            Label(L("Hızlı İşlemler", "Quick actions"), systemImage: "bolt.fill")
+            Spacer()
+            Button(action: {
+                showAppPicker = true
+            }) {
+                Image(systemName: "plus.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .help(L("Uygulama Ekle", "Add app"))
+        }) {
+            VStack(spacing: 8) {
+                if !appState.favoriteApps.isEmpty {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: 12) {
+                        ForEach(appState.favoriteApps) { app in
+                            FavoriteAppButton(
+                                app: app,
+                                byedpiService: byedpiService,
+                                onRemove: {
+                                    appState.removeFavoriteApp(app)
+                                },
+                                onEdit: {
+                                    editingApp = app
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    Text(L("Hızlı erişim için uygulama ekleyin", "Add apps for quick access"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Button(action: {
+                        Task {
+                            if byedpiService.isRunning {
+                                await byedpiService.stop()
+                            } else {
+                                await byedpiService.start()
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: byedpiService.isRunning ? "stop.circle.fill" : "play.circle.fill")
+                            Text(byedpiService.isRunning ? L("Durdur", "Stop") : L("Başlat", "Start"))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(byedpiService.isRunning ? .red : .green)
+                    .disabled(isBusy)
+
+                    Button(action: {
+                        Task {
+                            await byedpiService.killAllProcesses()
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "xmark.octagon.fill")
+                            Text(L("Tümünü Zorla Kapat", "Force stop all"))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .disabled(isBusy)
+                    .help(L("Tüm ciadpi süreçlerini zorla kapatır (gerekirse yönetici izni ister)",
+                            "Force-stops all ciadpi processes (asks for administrator permission if needed)"))
+                }
+
+                HStack(spacing: 12) {
+                    Button(action: {
+                        showSystemProxyInfo = true
+                    }) {
+                        HStack {
+                            Image(systemName: "network")
+                            Text(L("Sistem Proxy", "System proxy"))
+                            if systemProxy.isOurProxyActive {
+                                Circle()
+                                    .fill(byedpiService.isRunning ? Color.green : Color.orange)
+                                    .frame(width: 8, height: 8)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!byedpiService.isRunning && !systemProxy.isOurProxyActive)
+                }
+            }
+            .padding()
+        }
+    }
+
+    private var presetSection: some View {
+        GroupBox(label: Label(L("Önceden Hazır Ayarlar", "Presets"), systemImage: "list.bullet.rectangle")) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L("DPI aşım yöntemi seçin (çalışıyorsa seçilen yöntemle yeniden başlatılır):",
+                       "Choose a DPI bypass method (ByeDPI restarts with it if it is running):"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Picker(L("Yöntem", "Method"), selection: presetBinding) {
+                    ForEach(byedpiService.presets) { preset in
+                        Text(preset.name).tag(preset.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(isBusy)
+
+                if isCustomSelected {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L("Özel Parametreler", "Custom parameters"))
+                            .font(.headline)
+
+                        TextEditor(text: $byedpiService.customArgs)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(height: 80)
+                            .border(Color.secondary.opacity(0.3), width: 1)
+                            .cornerRadius(4)
+
+                        HStack {
+                            Text(L("Örnek: -s 1 --tlsrec 1+s   (-i 127.0.0.1 ve -p 1080 otomatik eklenir)",
+                                   "Example: -s 1 --tlsrec 1+s   (-i 127.0.0.1 and -p 1080 are added automatically)"))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button(L("Uygula", "Apply")) {
+                                byedpiService.applyCustomArgs()
+                            }
+                            .disabled(isBusy
+                                      || ByeDPIArguments.tokenize(byedpiService.customArgs).isEmpty)
+                            .help(L("Çalışıyorsa ByeDPI'ı bu parametrelerle yeniden başlatır",
+                                    "Restarts ByeDPI with these parameters if it is running"))
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text(L("Parametreler:", "Parameters:"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(byedpiService.args(for: byedpiService.currentPreset))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(6)
+
+                    Button(action: {
+                        byedpiService.editAsCustom()
+                    }) {
+                        HStack {
+                            Image(systemName: "pencil.circle")
+                            Text(L("Özel Parametreleri Düzenle", "Edit custom parameters"))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.blue)
+                    .disabled(isBusy)
+                    .help(L("Özel (Custom) moduna geçer; özel parametreler boşsa veya değiştirilmemişse bu yöntemin parametreleriyle doldurulur",
+                            "Switches to Custom mode; prefills with this method's parameters unless you have saved your own"))
+                }
+            }
+            .padding()
+        }
+    }
+
+    private var howToSection: some View {
+        GroupBox(label: Label(L("Nasıl Kullanılır?", "How to use"), systemImage: "questionmark.circle.fill")) {
+            VStack(alignment: .leading, spacing: 12) {
+                InfoRow(
+                    icon: "1.circle.fill",
+                    title: L("ByeDPI'ı Başlatın", "Start ByeDPI"),
+                    description: L("Yukarıdaki 'Başlat' butonuna tıklayın.",
+                                   "Click the 'Start' button above.")
+                )
+
+                InfoRow(
+                    icon: "2.circle.fill",
+                    title: L("Uygulama Ekleyin", "Add apps"),
+                    description: L("Hızlı İşlemler bölümündeki + butonuna tıklayarak favori uygulamalarınızı ekleyin.",
+                                   "Click the + button in the Quick actions section to add your favorite apps.")
+                )
+
+                InfoRow(
+                    icon: "3.circle.fill",
+                    title: L("Uygulamayı Başlatın", "Launch the app"),
+                    description: L("Eklediğiniz uygulamanın ikonuna tıklayın; uygulama ByeDPI proxy ayarıyla başlatılır (çalışıyorsa yeniden başlatılması önerilir).",
+                                   "Click the icon of an app you added; it launches with the ByeDPI proxy setting (if it is already running, restarting it is recommended).")
+                )
+
+                Divider()
+
+                // Markdown (**kalın**) içerdiği için LocalizedStringKey ile gösterilir.
+                Text(LocalizedStringKey(L(
+                    "**Not:** ByeDPI yerel bir SOCKS5 proxy (\(byedpiService.proxyAddress)) oluşturur. Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda (Discord, Chrome, Brave, Edge, Slack, Spotify…) çalışır. Safari, Roblox ve oyunlar gibi diğer uygulamalar için 'Sistem Proxy' veya WireGuard kullanın.",
+                    "**Note:** ByeDPI creates a local SOCKS5 proxy (\(byedpiService.proxyAddress)). The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). For other apps such as Safari, Roblox and games, use 'System proxy' or WireGuard."
+                )))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+        }
+    }
+
+    private var advancedSection: some View {
+        GroupBox(label: Label(L("Gelişmiş", "Advanced"), systemImage: "gearshape.2.fill")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Discord Ayarları", "Discord settings"))
+                    .font(.headline)
+
+                Text(L("Discord'un otomatik güncellemelerini devre dışı bırakmak için settings.json dosyasına şu satırları ekleyin:",
+                       "To turn off Discord's automatic updates, add these lines to settings.json:"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: "\"SKIP_HOST_UPDATE\": true,")
+                        .font(.system(.caption, design: .monospaced))
+                    Text(verbatim: "\"SKIP_MODULE_UPDATE\": true")
+                        .font(.system(.caption, design: .monospaced))
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(6)
+
+                Button(action: openDiscordSettingsFolder) {
+                    HStack {
+                        Image(systemName: "folder")
+                        Text(L("settings.json Klasörünü Aç", "Open settings.json folder"))
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+        }
+    }
+
+    @ViewBuilder
+    private var statusMessageView: some View {
+        if byedpiService.isProcessing {
+            ProgressView(byedpiService.statusMessage)
+                .progressViewStyle(.linear)
+        } else if !byedpiService.statusMessage.isEmpty {
+            let style = StatusStyle(kind: byedpiService.statusKind)
+            HStack(alignment: .top) {
+                Image(systemName: style.icon)
+                    .foregroundColor(style.color)
+                Text(byedpiService.statusMessage)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .background(style.color.opacity(0.1))
+            .cornerRadius(8)
+        }
+    }
+
+    private func openDiscordSettingsFolder() {
+        let folder = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/discord", isDirectory: true)
+        let settings = folder.appendingPathComponent("settings.json")
+        if FileManager.default.fileExists(atPath: settings.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([settings])
+        } else if FileManager.default.fileExists(atPath: folder.path) {
+            NSWorkspace.shared.open(folder)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = L("Klasör bulunamadı", "Folder not found")
+            alert.informativeText = L(
+                "Discord ayar klasörü bulunamadı:\n\(folder.path)\n\nDiscord'u en az bir kez açtığınızdan emin olun.",
+                "Couldn't find the Discord settings folder:\n\(folder.path)\n\nMake sure you have opened Discord at least once."
+            )
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L("Tamam", "OK"))
+            alert.runModal()
+        }
+    }
+}
+
+/// Durum türüne göre simge/renk.
+private struct StatusStyle {
+    let icon: String
+    let color: Color
+
+    init(kind: ByeDPIStatusKind) {
+        switch kind {
+        case .info:
+            icon = "info.circle.fill"; color = .blue
+        case .success:
+            icon = "checkmark.circle.fill"; color = .green
+        case .warning:
+            icon = "exclamationmark.triangle.fill"; color = .orange
+        case .error:
+            icon = "xmark.octagon.fill"; color = .red
+        }
     }
 }
 
 struct FavoriteAppButton: View {
     let app: AppState.FavoriteApp
-    let byedpiService: ByeDPIService
+    @ObservedObject var byedpiService: ByeDPIService
     let onRemove: () -> Void
     let onEdit: () -> Void
 
@@ -355,23 +503,15 @@ struct FavoriteAppButton: View {
     var body: some View {
         Button(action: {
             Task {
-                await byedpiService.startWithApp(appPath: app.path, appName: app.name, customArgs: app.customArgs)
+                await byedpiService.launchFavoriteApp(app)
             }
         }) {
             ZStack(alignment: .topTrailing) {
                 VStack(spacing: 8) {
-                    // App Icon
-                    if let icon = getAppIcon(path: app.path) {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .frame(width: 48, height: 48)
-                    } else {
-                        Image(systemName: "app.fill")
-                            .font(.system(size: 48))
-                            .foregroundColor(.accentColor)
-                    }
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+                        .resizable()
+                        .frame(width: 48, height: 48)
 
-                    // App Name
                     Text(app.name)
                         .font(.caption)
                         .fontWeight(.medium)
@@ -386,7 +526,6 @@ struct FavoriteAppButton: View {
                         .stroke(Color.accentColor.opacity(isHovering ? 0.5 : 0), lineWidth: 2)
                 )
 
-                // Action buttons
                 if isHovering {
                     VStack(spacing: 4) {
                         Button(action: onEdit) {
@@ -395,7 +534,7 @@ struct FavoriteAppButton: View {
                                 .background(Circle().fill(Color.white))
                         }
                         .buttonStyle(.plain)
-                        .help("Parametreleri Düzenle")
+                        .help(L("Parametreleri Düzenle", "Edit parameters"))
 
                         Button(action: onRemove) {
                             Image(systemName: "xmark.circle.fill")
@@ -403,21 +542,19 @@ struct FavoriteAppButton: View {
                                 .background(Circle().fill(Color.white))
                         }
                         .buttonStyle(.plain)
-                        .help("Kaldır")
+                        .help(L("Kaldır", "Remove"))
                     }
                     .offset(x: 8, y: -8)
                 }
             }
         }
         .buttonStyle(.plain)
+        .disabled(byedpiService.isProcessing)
         .onHover { hovering in
             isHovering = hovering
         }
-        .help("ByeDPI ile \(app.name)'i Başlat")
-    }
-
-    private func getAppIcon(path: String) -> NSImage? {
-        return NSWorkspace.shared.icon(forFile: path)
+        // "'i" eki her uygulama adına uymadığından (ör. Discord'u) ekten kaçınılır.
+        .help(L("\(app.name) uygulamasını ByeDPI ile başlat", "Launch \(app.name) with ByeDPI"))
     }
 }
 
@@ -427,19 +564,20 @@ struct AppPickerView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Uygulama Seç")
+            Text(L("Uygulama Seç", "Choose an app"))
                 .font(.headline)
 
-            Text("Hızlı erişim için eklemek istediğiniz uygulamayı seçin")
+            Text(L("Hızlı erişim için eklemek istediğiniz uygulamayı seçin",
+                   "Choose the app you want to add for quick access"))
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            Button("Applications Klasöründen Seç") {
+            Button(L("Applications Klasöründen Seç", "Choose from Applications folder")) {
                 selectApp()
             }
             .buttonStyle(.borderedProminent)
 
-            Button("İptal") {
+            Button(L("İptal", "Cancel")) {
                 isPresented = false
             }
             .buttonStyle(.bordered)
@@ -479,14 +617,14 @@ struct AppEditorView: View {
 
     @State private var editedArgs: String = ""
 
+    private static let defaultArgs = "--proxy-server=socks5://127.0.0.1:1080"
+
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             HStack(spacing: 12) {
-                if let icon = NSWorkspace.shared.icon(forFile: app.path) as NSImage? {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .frame(width: 48, height: 48)
-                }
+                Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+                    .resizable()
+                    .frame(width: 48, height: 48)
                 VStack(alignment: .leading) {
                     Text(app.name)
                         .font(.headline)
@@ -501,10 +639,11 @@ struct AppEditorView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Başlatma Parametreleri")
+                Text(L("Başlatma Parametreleri", "Launch parameters"))
                     .font(.headline)
 
-                Text("Uygulama başlatılırken kullanılacak komut satırı parametreleri:")
+                Text(L("Uygulama başlatılırken kullanılacak komut satırı parametreleri:",
+                       "Command-line parameters used when launching the app:"))
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -514,12 +653,18 @@ struct AppEditorView: View {
                     .border(Color.secondary.opacity(0.3), width: 1)
                     .cornerRadius(4)
 
-                Text("Varsayılan: --proxy-server=socks5://127.0.0.1:1080")
+                Text(L("Varsayılan: \(Self.defaultArgs)", "Default: \(Self.defaultArgs)"))
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Button("Varsayılana Sıfırla") {
-                    editedArgs = "--proxy-server=socks5://127.0.0.1:1080"
+                Text(L("Not: Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda çalışır (Discord, Chrome, Brave, Edge, Slack, Spotify…). Safari, Roblox ve oyunlar gibi diğer uygulamalar bu parametreyi yok sayar; bunlar için 'Sistem Proxy' veya WireGuard kullanın.",
+                       "Note: The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). Other apps such as Safari, Roblox and games ignore it; use 'System proxy' or WireGuard for them."))
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(L("Varsayılana Sıfırla", "Reset to default")) {
+                    editedArgs = Self.defaultArgs
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.blue)
@@ -529,12 +674,12 @@ struct AppEditorView: View {
             Divider()
 
             HStack(spacing: 12) {
-                Button("İptal") {
+                Button(L("İptal", "Cancel")) {
                     onDismiss()
                 }
                 .buttonStyle(.bordered)
 
-                Button("Kaydet") {
+                Button(L("Kaydet", "Save")) {
                     var updatedApp = app
                     updatedApp.customArgs = editedArgs
                     appState.updateFavoriteApp(updatedApp)
@@ -544,7 +689,7 @@ struct AppEditorView: View {
             }
         }
         .padding()
-        .frame(width: 500, height: 350)
+        .frame(width: 500, height: 420)
         .onAppear {
             editedArgs = app.customArgs
         }
@@ -575,26 +720,34 @@ struct InfoRow: View {
 struct SystemProxyConfigView: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject var byedpiService: ByeDPIService
+    @ObservedObject var systemProxy: SystemProxyService
     @State private var isLoading = true
-    @State private var isToggling = false
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Sistem Proxy Yapılandırması")
+            Text(L("Sistem Proxy Yapılandırması", "System proxy settings"))
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("Bu seçenek sistem genelinde SOCKS5 proxy ayarları yapar.")
+                Text(L("Bu seçenek sistem genelinde SOCKS5 proxy (\(byedpiService.proxyAddress)) ayarı yapar; proxy parametresini desteklemeyen uygulamalar (Safari vb.) da ByeDPI üzerinden bağlanır.",
+                       "This option sets a system-wide SOCKS5 proxy (\(byedpiService.proxyAddress)), so apps that don't support the proxy parameter (Safari, etc.) also connect through ByeDPI."))
                     .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Text("Etkinleştirildiğinde, tüm uygulamalar ByeDPI üzerinden bağlanır.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text(L("Sistem proxy yalnızca SplitWire/ByeDPI çalışırken güvenlidir. ByeDPI durdurulduğunda veya uygulamadan çıkıldığında otomatik olarak kapatılır (yönetici parolası istenir). Kapatılmazsa internet bağlantınız çalışmaz.",
+                           "The system proxy is only safe while SplitWire/ByeDPI is running. It is turned off automatically when ByeDPI stops or you quit the app (your administrator password is required). If it stays on, your internet connection won't work."))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Divider()
 
                 HStack {
-                    Text("Sistem Proxy Durumu:")
+                    Text(L("Sistem Proxy Durumu:", "System proxy status:"))
                         .fontWeight(.medium)
                     Spacer()
                     if isLoading {
@@ -603,10 +756,13 @@ struct SystemProxyConfigView: View {
                     } else {
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(byedpiService.isSystemProxyEnabled ? Color.green : Color.red)
+                                .fill(systemProxy.isOurProxyActive ? Color.green : Color.red)
                                 .frame(width: 8, height: 8)
-                            Text(byedpiService.isSystemProxyEnabled ? "Açık" : "Kapalı")
-                                .foregroundColor(byedpiService.isSystemProxyEnabled ? .green : .red)
+                            let services = systemProxy.activeServices.joined(separator: ", ")
+                            Text(systemProxy.isOurProxyActive
+                                 ? L("Açık (\(services))", "On (\(services))")
+                                 : L("Kapalı", "Off"))
+                                .foregroundColor(systemProxy.isOurProxyActive ? .green : .red)
                         }
                     }
                 }
@@ -615,47 +771,45 @@ struct SystemProxyConfigView: View {
 
                 HStack(spacing: 12) {
                     Button(action: {
-                        Task {
-                            isToggling = true
-                            await byedpiService.configureSystemProxy(enable: true)
-                            await byedpiService.checkSystemProxyStatus()
-                            isToggling = false
-                        }
+                        Task { await byedpiService.enableSystemProxy() }
                     }) {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Aç")
+                            Text(L("Aç", "Turn on"))
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
-                    .disabled(isToggling || byedpiService.isSystemProxyEnabled)
+                    .disabled(systemProxy.isBusy || systemProxy.isOurProxyActive
+                              || !byedpiService.isRunning || byedpiService.isProcessing)
 
                     Button(action: {
-                        Task {
-                            isToggling = true
-                            await byedpiService.configureSystemProxy(enable: false)
-                            await byedpiService.checkSystemProxyStatus()
-                            isToggling = false
-                        }
+                        Task { await byedpiService.disableSystemProxy() }
                     }) {
                         HStack {
                             Image(systemName: "xmark.circle.fill")
-                            Text("Kapat")
+                            Text(L("Kapat", "Turn off"))
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
-                    .disabled(isToggling || !byedpiService.isSystemProxyEnabled)
+                    .disabled(systemProxy.isBusy || !systemProxy.isOurProxyActive)
                 }
 
-                if isToggling {
+                if !byedpiService.isRunning && !systemProxy.isOurProxyActive {
+                    Text(L("Sistem proxy'yi açmak için önce ByeDPI'ı başlatın.",
+                           "Start ByeDPI first to turn on the system proxy."))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if systemProxy.isBusy {
                     HStack {
                         ProgressView()
                             .scaleEffect(0.7)
-                        Text("İşlem yapılıyor...")
+                        Text(L("İşlem yapılıyor...", "Working…"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -665,16 +819,16 @@ struct SystemProxyConfigView: View {
             .background(Color.secondary.opacity(0.1))
             .cornerRadius(8)
 
-            Button("Kapat") {
+            Button(L("Kapat", "Close")) {
                 dismiss()
             }
             .buttonStyle(.bordered)
         }
         .padding()
-        .frame(width: 450, height: 350)
+        .frame(width: 480, height: 440)
         .onAppear {
             Task {
-                await byedpiService.checkSystemProxyStatus()
+                await systemProxy.refresh()
                 isLoading = false
             }
         }

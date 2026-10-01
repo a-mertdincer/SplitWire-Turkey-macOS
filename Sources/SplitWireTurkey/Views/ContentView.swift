@@ -24,13 +24,13 @@ struct ContentView: View {
 
                 NetworkConfigView()
                     .tabItem {
-                        Label("Ağ Ayarları", systemImage: "gearshape")
+                        Label(L("Ağ Ayarları", "Network"), systemImage: "gearshape")
                     }
                     .tag(2)
 
                 AboutView()
                     .tabItem {
-                        Label("Hakkında", systemImage: "info.circle")
+                        Label(L("Hakkında", "About"), systemImage: "info.circle")
                     }
                     .tag(3)
             }
@@ -39,6 +39,11 @@ struct ContentView: View {
             // Status Bar
             StatusBarView()
         }
+        // Dil değişince (#8) tüm pencere ağacı yeniden kurulur; L(...) metinleri yeniden okunur.
+        // Görünümler kalıcı durumu tutmaz: servisler uygulama düzeyindeki paylaşılan örneklerdir,
+        // seçili sekme AppState'te saklanır.
+        .id(appState.selectedLanguage)
+        .environment(\.locale, appState.selectedLanguage.locale)
         .preferredColorScheme(appState.isDarkMode ? .dark : .light)
     }
 }
@@ -53,26 +58,37 @@ struct HeaderView: View {
                 Text("SplitWire-Turkey")
                     .font(.title)
                     .fontWeight(.bold)
-                Text("macOS Edition")
+                Text(L("macOS için", "for macOS"))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
-            // Language Picker
-            Picker("", selection: $appState.selectedLanguage) {
-                ForEach(AppState.Language.allCases, id: \.self) { lang in
-                    Text(lang.rawValue).tag(lang)
+            // Dil seçimi (#8)
+            Picker(L("Dil", "Language"), selection: $appState.selectedLanguage) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(language.displayName).tag(language)
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(width: 120)
+            .help(L("Arayüz dili", "Interface language"))
+
+            // Dock simgesini gizle (#6) — uygulama menü çubuğunda çalışmaya devam eder
+            Toggle(L("Dock simgesini gizle", "Hide Dock icon"), isOn: $appState.hideDockIcon)
+                .toggleStyle(.checkbox)
+                .help(L(
+                    "Dock simgesini gizler. Uygulamaya menü çubuğundaki kalkan simgesinden erişebilirsiniz.",
+                    "Hides the Dock icon. You can still open the app from the shield icon in the menu bar."
+                ))
 
             // Dark Mode Toggle
-            Toggle("", isOn: $appState.isDarkMode)
+            Toggle(L("Koyu mod", "Dark mode"), isOn: $appState.isDarkMode)
                 .toggleStyle(.switch)
                 .labelsHidden()
+                .help(L("Koyu mod", "Dark mode"))
                 .onChange(of: appState.isDarkMode) { _ in
                     appState.saveSettings()
                 }

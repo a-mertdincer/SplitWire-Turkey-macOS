@@ -2,413 +2,300 @@ import Foundation
 import AppKit
 import Combine
 
+/// Menü çubuğu (NSStatusItem) arayüzü.
+///
+/// Kendi süreç/preset durumu YOKTUR: `ByeDPIService`'i Combine ile izler ve
+/// tüm işlemler için onun metodlarını çağırır (#12).
 @MainActor
-class MenuBarService: ObservableObject {
+final class MenuBarService: NSObject, ObservableObject, NSMenuDelegate {
+    private let byedpi: ByeDPIService
+    private let systemProxy: SystemProxyService
+    private let appState: AppState
+
     private var statusItem: NSStatusItem?
+    private let menu = NSMenu()
     private var cancellables = Set<AnyCancellable>()
-    private var statusCheckTimer: Timer?
-    private var currentPreset = "Standart"
-    private var isProcessing = false
+    /// Menü açıkken yeniden kurma ertelenir (açık alt menü / ipucu kapanmasın).
+    private var isMenuOpen = false
+    private var needsRebuild = false
 
-    @Published var isByeDPIRunning = false
+    init(byedpi: ByeDPIService, systemProxy: SystemProxyService, appState: AppState) {
+        self.byedpi = byedpi
+        self.systemProxy = systemProxy
+        self.appState = appState
+        super.init()
+    }
 
-    // Available presets matching ByeDPIService
-    private let presets: [String: String] = [
-        "Standart": "-r 1+s",
-        "Split 1": "-s 1 --tlsrec 1+s",
-        "Split 2": "-s 2 --tlsrec 1+s",
-        "Disorder": "--disorder 1 --auto=torst --tlsrec 1+s",
-        "Fake -1": "--fake -1 --ttl 8",
-        "Fake 1": "-f 1 --ttl 8 -s 2",
-        "OOB": "-o 1 --auto=torst",
-        "Split + Disorder": "-s 1 -d 2 --auto=torst"
-    ]
-
+    /// Menü çubuğu öğesini oluşturur (uygulama açılışında bir kez).
     func setup() {
-        // Load saved preset
-        if let savedPreset = UserDefaults.standard.string(forKey: "menuBarPreset"),
-           presets.keys.contains(savedPreset) {
-            currentPreset = savedPreset
-        }
+        guard statusItem == nil else { return }
 
-        // Create status bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = item
+        menu.delegate = self
+        menu.autoenablesItems = false
+        item.menu = menu
 
-        if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "shield.slash", accessibilityDescription: "ByeDPI")
-            button.image?.isTemplate = true
-        }
+        rebuild()
 
-        // Create the menu
-        updateMenu()
+        // Servisteki her değişiklikte menüyü ve simgeyi yenile.
+        // objectWillChange değişiklikten ÖNCE yayınlanır; ana kuyrukta ertelenerek yeni değerler okunur.
+        byedpi.objectWillChange
+            .merge(with: systemProxy.objectWillChange, appState.objectWillChange)
+            .debounce(for: .milliseconds(30), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuildOrDefer()
+            }
+            .store(in: &cancellables)
 
-        // Start periodic status check to detect process changes
-        startStatusCheck()
+        // Dil değişince (#8) tüm başlıkları yeniden üret
+        NotificationCenter.default.publisher(for: .appLanguageDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuild()
+            }
+            .store(in: &cancellables)
+    }
 
-        // Initial check
-        Task {
-            await checkByeDPIStatus()
+    // MARK: - NSMenuDelegate
+
+    nonisolated func menuNeedsUpdate(_ menu: NSMenu) {
+        MainActor.assumeIsolated {
+            rebuild()
         }
     }
 
-    private func startStatusCheck() {
-        statusCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.checkByeDPIStatus()
+    nonisolated func menuWillOpen(_ menu: NSMenu) {
+        MainActor.assumeIsolated {
+            if menu === self.menu { isMenuOpen = true }
+        }
+    }
+
+    nonisolated func menuDidClose(_ menu: NSMenu) {
+        MainActor.assumeIsolated {
+            guard menu === self.menu else { return }
+            isMenuOpen = false
+            if needsRebuild {
+                needsRebuild = false
+                rebuildMenu()
             }
         }
     }
 
-    private func checkByeDPIStatus() async {
-        // Check if port 1080 is in use (indicates ByeDPI is running)
-        do {
-            let result = try await executeShellCommand("lsof -i :1080 2>/dev/null | grep -c ciadpi || echo 0")
-            let count = Int(result.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-            let isRunning = count > 0
+    // MARK: - Menü
 
-            if isRunning != isByeDPIRunning {
-                isByeDPIRunning = isRunning
-                updateStatusIcon(isRunning: isRunning)
-                updateMenu()
-            }
-        } catch {
-            // Silently fail
-        }
+    private func rebuild() {
+        updateStatusIcon()
+        rebuildMenu()
     }
 
-    private func executeShellCommand(_ command: String) async throws -> String {
-        let task = Process()
-        let pipe = Pipe()
-
-        task.standardOutput = pipe
-        task.standardError = pipe
-        task.arguments = ["-c", command]
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-
-        try task.run()
-        task.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
-    }
-
-    private func updateStatusIcon(isRunning: Bool) {
-        if let button = statusItem?.button {
-            let iconName = isRunning ? "shield.checkered" : "shield.slash"
-            button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "ByeDPI")
-            button.image?.isTemplate = true
-        }
-    }
-
-    private func updateMenu() {
-        let menu = NSMenu()
-
-        // Status
-        let statusItem = NSMenuItem(title: isByeDPIRunning ? "ByeDPI: Çalışıyor" : "ByeDPI: Durduruldu", action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-
-        // Add colored circle indicator
-        if isByeDPIRunning {
-            statusItem.image = createCircleImage(color: .systemGreen)
+    /// Menü açıkken öğeleri silip yeniden eklemek açık alt menüyü kapatır; kapanınca yeniden kurulur
+    /// (`menuNeedsUpdate` her açılışta zaten tazeler).
+    private func rebuildOrDefer() {
+        updateStatusIcon()
+        if isMenuOpen {
+            needsRebuild = true
         } else {
-            statusItem.image = createCircleImage(color: .systemRed)
+            rebuildMenu()
         }
+    }
 
-        menu.addItem(statusItem)
-        menu.addItem(NSMenuItem.separator())
+    private func updateStatusIcon() {
+        guard let button = statusItem?.button else { return }
+        let iconName = byedpi.isRunning ? "shield.checkered" : "shield.slash"
+        let image = NSImage(systemSymbolName: iconName, accessibilityDescription: "ByeDPI")
+        image?.isTemplate = true
+        button.image = image
+        button.toolTip = byedpi.isRunning
+            ? L("ByeDPI çalışıyor (\(byedpi.proxyAddress))", "ByeDPI is running (\(byedpi.proxyAddress))")
+            : L("ByeDPI durduruldu", "ByeDPI is stopped")
+    }
 
-        // Toggle ByeDPI
-        if isByeDPIRunning {
-            let stopItem = NSMenuItem(title: "ByeDPI'ı Durdur", action: #selector(stopByeDPI), keyEquivalent: "s")
-            stopItem.target = self
-            stopItem.isEnabled = !isProcessing
-            menu.addItem(stopItem)
+    private func rebuildMenu() {
+        menu.removeAllItems()
+        // Sistem proxy parola penceresi açıkken de Başlat/Durdur/preset devre dışı (#14 yarışı)
+        let busy = byedpi.isProcessing || systemProxy.isBusy
+
+        // Durum
+        let statusTitle: String
+        if byedpi.isProcessing {
+            statusTitle = L("ByeDPI: İşlem yapılıyor…", "ByeDPI: Working…")
+        } else if byedpi.isRunning {
+            statusTitle = byedpi.isExternallyStarted
+                ? L("ByeDPI: Çalışıyor (harici)", "ByeDPI: Running (external)")
+                : L("ByeDPI: Çalışıyor", "ByeDPI: Running")
         } else {
-            let startItem = NSMenuItem(title: "ByeDPI'ı Başlat", action: #selector(startByeDPI), keyEquivalent: "b")
-            startItem.target = self
-            startItem.isEnabled = !isProcessing
-            menu.addItem(startItem)
+            statusTitle = L("ByeDPI: Durduruldu", "ByeDPI: Stopped")
         }
+        let statusLine = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
+        statusLine.isEnabled = false
+        statusLine.image = createCircleImage(color: byedpi.isRunning ? .systemGreen : .systemRed)
+        menu.addItem(statusLine)
 
-        // Kill All
-        let killAllItem = NSMenuItem(title: "Tümünü Zorla Kapat", action: #selector(killAllProcesses), keyEquivalent: "k")
-        killAllItem.target = self
-        killAllItem.isEnabled = !isProcessing
-        menu.addItem(killAllItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Proxy Info
-        if isByeDPIRunning {
-            let proxyInfo = NSMenuItem(title: "SOCKS5: 127.0.0.1:1080", action: #selector(copyProxyAddress), keyEquivalent: "")
-            proxyInfo.target = self
-            menu.addItem(proxyInfo)
-
-            menu.addItem(NSMenuItem.separator())
-        }
-
-        // Preset Selection Submenu
-        let presetMenu = NSMenu()
-        let sortedPresets = presets.keys.sorted()
-        for presetName in sortedPresets {
-            let presetItem = NSMenuItem(
-                title: presetName,
-                action: #selector(selectPreset(_:)),
-                keyEquivalent: ""
+        if byedpi.isRunning {
+            let presetText = byedpi.runningPreset.map(presetDisplayName) ?? L("harici", "external")
+            let runningLine = NSMenuItem(
+                title: L("Çalışan yöntem: \(presetText)", "Active method: \(presetText)"),
+                action: nil, keyEquivalent: ""
             )
-            presetItem.target = self
-            presetItem.representedObject = presetName
-            presetItem.isEnabled = !isProcessing
-
-            // Mark current preset with checkmark
-            if presetName == currentPreset {
-                presetItem.state = .on
+            runningLine.isEnabled = false
+            if let args = byedpi.runningArgs {
+                runningLine.toolTip = args
             }
+            menu.addItem(runningLine)
 
-            presetMenu.addItem(presetItem)
+            if byedpi.isExposedToNetwork {
+                let exposedLine = NSMenuItem(title: L("⚠︎ Tüm ağ arayüzlerinde dinliyor (ağınıza açık)",
+                                                      "⚠︎ Listening on all network interfaces (exposed)"),
+                                             action: nil, keyEquivalent: "")
+                exposedLine.isEnabled = false
+                exposedLine.toolTip = ByeDPIService.exposedWarning.resolved
+                exposedLine.image = createCircleImage(color: .systemOrange)
+                menu.addItem(exposedLine)
+            }
         }
 
-        let presetMenuItem = NSMenuItem(title: "DPI Yöntemi: \(currentPreset)", action: nil, keyEquivalent: "")
+        menu.addItem(.separator())
+
+        // Başlat / Durdur
+        if byedpi.isRunning {
+            menu.addItem(makeItem(L("ByeDPI'ı Durdur", "Stop ByeDPI"), #selector(stopByeDPI), key: "s", enabled: !busy))
+        } else {
+            menu.addItem(makeItem(L("ByeDPI'ı Başlat", "Start ByeDPI"), #selector(startByeDPI), key: "b", enabled: !busy))
+        }
+        let killItem = makeItem(L("Tümünü Zorla Kapat", "Force stop all"), #selector(killAllProcesses), key: "k", enabled: !busy)
+        killItem.toolTip = L(
+            "Tüm ciadpi süreçlerini sonlandırır ve gerekirse sistem proxy'yi kapatır.",
+            "Kills every ciadpi process and turns off the system proxy if needed."
+        )
+        menu.addItem(killItem)
+
+        menu.addItem(.separator())
+
+        if byedpi.isRunning {
+            menu.addItem(makeItem(
+                L("SOCKS5: \(byedpi.proxyAddress) (Kopyala)", "SOCKS5: \(byedpi.proxyAddress) (copy)"),
+                #selector(copyProxyAddress)
+            ))
+        }
+
+        // Sistem proxy durumu
+        if systemProxy.isOurProxyActive {
+            let proxyLine = NSMenuItem(title: L("Sistem Proxy: Açık", "System proxy: on"), action: nil, keyEquivalent: "")
+            proxyLine.isEnabled = false
+            proxyLine.image = createCircleImage(color: byedpi.isRunning ? .systemGreen : .systemOrange)
+            menu.addItem(proxyLine)
+            menu.addItem(makeItem(
+                L("Sistem Proxy'yi Kapat", "Turn off system proxy"),
+                #selector(disableSystemProxy),
+                enabled: !systemProxy.isBusy
+            ))
+        }
+
+        // Preset alt menüsü (tablo sırasıyla)
+        let presetMenu = NSMenu()
+        presetMenu.autoenablesItems = false
+        for preset in byedpi.presets {
+            let item = NSMenuItem(title: presetDisplayName(preset.id), action: #selector(selectPreset(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = preset.id
+            item.state = preset.id == byedpi.currentPreset ? .on : .off
+            let custom = byedpi.customArgs.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Boş Custom çalışan ByeDPI'ı yeniden başlatamaz; pencereden düzenlenmeli
+            item.isEnabled = !busy && !(preset.isCustom && custom.isEmpty && byedpi.isRunning)
+            if preset.isCustom {
+                item.toolTip = custom.isEmpty
+                    ? L("Özel parametreler boş — ana pencereden düzenleyin", "Custom arguments are empty — edit them in the main window")
+                    : custom
+            } else {
+                item.toolTip = preset.args
+            }
+            presetMenu.addItem(item)
+        }
+        let currentPresetName = presetDisplayName(byedpi.currentPreset)
+        let presetMenuItem = NSMenuItem(
+            title: L("DPI Yöntemi: \(currentPresetName)", "DPI method: \(currentPresetName)"),
+            action: nil, keyEquivalent: ""
+        )
         presetMenuItem.submenu = presetMenu
-        presetMenuItem.isEnabled = !isProcessing
+        presetMenuItem.isEnabled = !busy
         menu.addItem(presetMenuItem)
 
-        menu.addItem(NSMenuItem.separator())
+        menu.addItem(.separator())
 
-        // Show Main Window
-        let showWindowItem = NSMenuItem(title: "Ana Pencereyi Göster", action: #selector(showMainWindow), keyEquivalent: "o")
-        showWindowItem.target = self
-        menu.addItem(showWindowItem)
+        menu.addItem(makeItem(MainWindowController.localizedShowMenuTitle, #selector(showMainWindow), key: "o"))
 
-        menu.addItem(NSMenuItem.separator())
+        let dockItem = makeItem(L("Dock simgesini gizle", "Hide Dock icon"), #selector(toggleDockIcon))
+        dockItem.state = appState.hideDockIcon ? .on : .off
+        menu.addItem(dockItem)
 
-        // Quit
-        let quitItem = NSMenuItem(title: "Çıkış", action: #selector(quitApp), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
+        menu.addItem(.separator())
 
-        self.statusItem?.menu = menu
+        menu.addItem(makeItem(L("Çıkış", "Quit"), #selector(quitApp), key: "q"))
+    }
+
+    /// Preset kimliği (kalıcı, çevrilmez) → menüde gösterilen ad.
+    private func presetDisplayName(_ id: String) -> String {
+        ByeDPIPresets.preset(id: id)?.name ?? id
+    }
+
+    private func makeItem(_ title: String, _ action: Selector, key: String = "", enabled: Bool = true) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        item.isEnabled = enabled
+        return item
     }
 
     private func createCircleImage(color: NSColor) -> NSImage {
         let size = NSSize(width: 10, height: 10)
-        let image = NSImage(size: size)
-
-        image.lockFocus()
-        color.setFill()
-        let rect = NSRect(origin: .zero, size: size)
-        let path = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
-        path.fill()
-        image.unlockFocus()
-
+        let image = NSImage(size: size, flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
         image.isTemplate = false
         return image
     }
 
+    // MARK: - Eylemler
+
     @objc private func selectPreset(_ sender: NSMenuItem) {
-        guard let presetName = sender.representedObject as? String else { return }
-        guard !isProcessing else { return }
-
-        currentPreset = presetName
-
-        // Save to UserDefaults
-        UserDefaults.standard.set(currentPreset, forKey: "menuBarPreset")
-
-        // Update menu immediately to show new preset
-        updateMenu()
-
-        // Restart ByeDPI if running
-        if isByeDPIRunning {
-            isProcessing = true
-            updateMenu()
-
-            Task { @MainActor in
-                await performStopByeDPI()
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                await performStartByeDPI()
-                isProcessing = false
-                updateMenu()
-            }
-        }
+        guard let presetID = sender.representedObject as? String else { return }
+        byedpi.selectPreset(presetID)
     }
 
     @objc private func startByeDPI() {
-        guard !isProcessing else { return }
-
-        isProcessing = true
-        updateMenu()
-
-        Task { @MainActor in
-            await performStartByeDPI()
-            isProcessing = false
-            updateMenu()
-        }
+        Task { await byedpi.start() }
     }
 
     @objc private func stopByeDPI() {
-        guard !isProcessing else { return }
-
-        isProcessing = true
-        updateMenu()
-
-        Task { @MainActor in
-            await performStopByeDPI()
-            isProcessing = false
-            updateMenu()
-        }
-    }
-
-    private func performStartByeDPI() async {
-        do {
-            let ciadpiPath = findCiadpiPath()
-            guard FileManager.default.fileExists(atPath: ciadpiPath) else {
-                await showAlert(title: "Hata", message: "ciadpi binary bulunamadı")
-                return
-            }
-
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: ciadpiPath)
-
-            // Use current preset arguments
-            let args = presets[currentPreset] ?? "-r 1+s"
-            let argArray = args.split(separator: " ").map(String.init)
-            process.arguments = argArray
-
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-
-            try process.run()
-
-            // Wait and verify
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            await checkByeDPIStatus()
-
-            if isByeDPIRunning {
-                await showAlert(title: "Başarılı", message: "ByeDPI başlatıldı\nYöntem: \(currentPreset)\nSOCKS5: 127.0.0.1:1080")
-            }
-        } catch {
-            await showAlert(title: "Hata", message: "ByeDPI başlatılamadı: \(error.localizedDescription)")
-        }
-    }
-
-    private func performStopByeDPI() async {
-        _ = try? await executeShellCommand("pkill -f ciadpi")
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        _ = try? await executeShellCommand("pkill -9 -f ciadpi")
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        await checkByeDPIStatus()
+        Task { await byedpi.stop() }
     }
 
     @objc private func killAllProcesses() {
-        guard !isProcessing else { return }
-
-        isProcessing = true
-        updateMenu()
-
-        Task { @MainActor in
-            // Kill by port using lsof with sudo
-            _ = try? await executeAppleScript("""
-                do shell script "lsof -ti:1080 | xargs kill -9 2>/dev/null || true" with administrator privileges
-                """)
-            try? await Task.sleep(nanoseconds: 300_000_000)
-
-            // Kill all ciadpi processes by name
-            _ = try? await executeShellCommand("pkill -9 -f ciadpi 2>/dev/null || true")
-            try? await Task.sleep(nanoseconds: 300_000_000)
-
-            // Double check with killall
-            _ = try? await executeShellCommand("killall -9 ciadpi 2>/dev/null || true")
-            try? await Task.sleep(nanoseconds: 200_000_000)
-
-            await checkByeDPIStatus()
-            await showAlert(title: "Tamamlandı", message: "Tüm ByeDPI process'leri kapatıldı")
-
-            isProcessing = false
-            updateMenu()
-        }
+        Task { await byedpi.killAllProcesses() }
     }
 
-    private func executeAppleScript(_ script: String) async throws {
-        var error: NSDictionary?
-        let appleScript = NSAppleScript(source: script)
-        appleScript?.executeAndReturnError(&error)
-
-        if let error = error {
-            throw NSError(
-                domain: "AppleScript",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: error.description]
-            )
-        }
-    }
-
-    private func findCiadpiPath() -> String {
-        // Check bundle resources
-        if let bundlePath = Bundle.main.resourcePath {
-            let resourcePath = "\(bundlePath)/bin/ciadpi"
-            if FileManager.default.fileExists(atPath: resourcePath) {
-                return resourcePath
-            }
-        }
-
-        // Check next to executable
-        if let execPath = Bundle.main.executablePath {
-            let execDir = (execPath as NSString).deletingLastPathComponent
-            let devPath = "\(execDir)/../../../byedpi/ciadpi"
-            if FileManager.default.fileExists(atPath: devPath) {
-                return devPath
-            }
-        }
-
-        // Fallback
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/Downloads/SplitWire-Turkey-macOS/byedpi/ciadpi"
-    }
-
-    private func showAlert(title: String, message: String) async {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = title == "Hata" ? .warning : .informational
-        alert.addButton(withTitle: "Tamam")
-        alert.runModal()
+    @objc private func disableSystemProxy() {
+        Task { await byedpi.disableSystemProxy() }
     }
 
     @objc private func copyProxyAddress() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString("socks5://127.0.0.1:1080", forType: .string)
-
-        // Show brief notification via alert
-        let alert = NSAlert()
-        alert.messageText = "Kopyalandı"
-        alert.informativeText = "Proxy adresi panoya kopyalandı."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Tamam")
-
-        // Auto-dismiss after 1.5 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            alert.buttons.first?.performClick(nil)
-        }
-
-        alert.runModal()
+        pasteboard.setString("socks5://\(byedpi.proxyAddress)", forType: .string)
     }
 
     @objc private func showMainWindow() {
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        if let window = NSApplication.shared.windows.first {
-            window.makeKeyAndOrderFront(nil)
-        }
+        MainWindowController.shared.show()
+    }
+
+    @objc private func toggleDockIcon() {
+        appState.hideDockIcon.toggle()
     }
 
     @objc private func quitApp() {
-        // Stop ByeDPI before quitting
-        Task { @MainActor in
-            _ = try? await executeShellCommand("pkill -9 -f ciadpi")
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            NSApplication.shared.terminate(nil)
-        }
+        // Sistem proxy kapatma ve ciadpi durdurma AppDelegate.applicationShouldTerminate içinde
+        NSApp.terminate(nil)
     }
 }
