@@ -399,7 +399,7 @@ final class ByeDPIService: ObservableObject {
             privilegedParts.append("/usr/bin/pkill -9 -x ciadpi || true")
         }
         if !proxyServices.isEmpty {
-            privilegedParts.append(SystemProxyService.disableCommand(services: proxyServices))
+            privilegedParts.append(SystemProxyService.disableCommand(proxies: systemProxy.activeProxies))
         }
 
         var proxyWarning: LocalizedText?
@@ -503,11 +503,18 @@ final class ByeDPIService: ObservableObject {
            "The system proxy is still ON and points to the stopped ByeDPI (127.0.0.1:1080), so the internet will NOT work. Turn it off in the 'System proxy' section or restart ByeDPI.")
     }
 
-    /// Sistem SOCKS proxy'yi açar (ByeDPI çalışıyor olmalı).
+    /// Sistem SOCKS + HTTPS proxy'yi açar (ByeDPI çalışıyor olmalı).
     func enableSystemProxy() async {
         guard isRunning else {
             setStatus(.error, LT("Sistem proxy'yi açmadan önce ByeDPI'ı başlatın.",
                                  "Start ByeDPI before turning on the system proxy."))
+            return
+        }
+        // Uygulama dışında (ör. v1.1.0 ile) başlatılmış bir ciadpi -G olmadan çalışıyor olabilir:
+        // HTTPS proxy ona yönlendirilirse HTTPS bağlantıları kurulamaz (#13).
+        if isExternallyStarted, !ByeDPIArguments.commandLineSupportsHTTPConnect(runningArgs) {
+            setStatus(.warning, LT("Çalışan ByeDPI bu uygulama dışında (ör. eski bir sürümle) başlatılmış ve HTTPS proxy desteği (-G) olmadan çalışıyor. Sistem proxy'yi açmadan önce ByeDPI'ı durdurup yeniden başlatın.",
+                                   "The running ByeDPI was started outside this app (e.g. by an older version) and runs without HTTPS proxy support (-G). Stop and restart ByeDPI before turning on the system proxy."))
             return
         }
         do {
@@ -520,8 +527,8 @@ final class ByeDPIService: ObservableObject {
                 }
                 return
             }
-            setStatus(.success, LT("Sistem proxy açıldı (\(service) → \(proxyAddress)). Yalnızca ByeDPI çalışırken güvenlidir; ByeDPI durdurulduğunda veya uygulamadan çıkıldığında otomatik kapatılır.",
-                                   "System proxy turned on (\(service) → \(proxyAddress)). It is only safe while ByeDPI is running; it turns off automatically when ByeDPI stops or you quit the app."))
+            setStatus(.success, LT("Sistem proxy açıldı (SOCKS + HTTPS, \(service) → \(proxyAddress)). Yalnızca ByeDPI çalışırken güvenlidir; ByeDPI durdurulduğunda veya uygulamadan çıkıldığında otomatik kapatılır.",
+                                   "System proxy turned on (SOCKS + HTTPS, \(service) → \(proxyAddress)). It is only safe while ByeDPI is running; it turns off automatically when ByeDPI stops or you quit the app."))
         } catch SystemProxyError.noListener {
             setStatus(.warning, LT("ByeDPI, sistem proxy açılmadan önce durdu; proxy açılmadı.",
                                    "ByeDPI stopped before the system proxy could be turned on; it was not turned on."))

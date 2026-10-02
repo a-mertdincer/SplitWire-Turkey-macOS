@@ -49,6 +49,130 @@ final class DNSHealthEvaluatorTests: XCTestCase {
         XCTAssertEqual(DNSHealthEvaluator.combine([]), .unknown)
     }
 
+    /// Birden çok zehirlenmiş sonuç: adresler birleştirilir (tekrarsız).
+    func testCombineMergesPoisonedAddresses() {
+        let discord = DNSHealthState.poisoned(systemIPs: ["195.175.254.2"], expectedIPs: realDiscord)
+        let roblox = DNSHealthState.poisoned(systemIPs: ["195.175.254.2", "10.0.0.1"], expectedIPs: [])
+        XCTAssertEqual(DNSHealthEvaluator.combine([discord, .ok, roblox]),
+                       .poisoned(systemIPs: ["195.175.254.2", "10.0.0.1"], expectedIPs: realDiscord))
+    }
+
+    /// #13: Roblox yalnızca bilinen engelleme adresiyle "zehirli" sayılır (CDN adresleri konuma göre değişir).
+    func testRobloxKnownBlockIPOnly() {
+        let roblox = DNSCheckTarget(host: "www.roblox.com", service: "Roblox", rule: .knownBlockIPOnly)
+        XCTAssertEqual(DNSHealthEvaluator.evaluate(roblox, systemIPs: ["195.175.254.2"], dohIPs: nil),
+                       .poisoned(systemIPs: ["195.175.254.2"], expectedIPs: []))
+        // DoH farklı bir CDN adresi döndürse bile yanlış alarm yok
+        XCTAssertEqual(DNSHealthEvaluator.evaluate(roblox, systemIPs: ["23.48.136.233"], dohIPs: ["128.116.31.3"]), .ok)
+        XCTAssertEqual(DNSHealthEvaluator.evaluate(roblox, systemIPs: ["128.116.21.3"], dohIPs: nil), .ok)
+        // Sistem çözemedi: bilinmiyor
+        XCTAssertEqual(DNSHealthEvaluator.evaluate(roblox, systemIPs: [], dohIPs: ["128.116.31.3"]), .unknown)
+    }
+
+    /// Roblox, Discord için zehirli bulunan adresle (bilinmeyen bir engelleme sayfası) eşleşirse zehirli sayılır.
+    func testRobloxUsesAddressDiscordWasPoisonedWith() {
+        let t = DNSHealthChecker.targets
+        let results = DNSHealthEvaluator.evaluateAll([
+            (t[0], ["10.0.0.1"], realDiscord),
+            (t[1], ["10.0.0.1"], realDiscord),
+            (t[2], ["10.0.0.1"], nil),
+        ])
+        XCTAssertEqual(results.map(\.0), t)
+        XCTAssertEqual(results[2].1, .poisoned(systemIPs: ["10.0.0.1"], expectedIPs: []))
+        XCTAssertEqual(DNSHealthEvaluator.affectedServices(results), ["Discord", "Roblox"])
+
+        // Discord aynı şekilde zehirli, Roblox gerçek bir CDN adresi: yanlış alarm yok
+        let cdn = DNSHealthEvaluator.evaluateAll([
+            (t[0], ["10.0.0.1"], realDiscord),
+            (t[2], ["23.48.136.233"], nil),
+        ])
+        XCTAssertEqual(cdn[1].1, .ok)
+        XCTAssertEqual(DNSHealthEvaluator.affectedServices(cdn), ["Discord"])
+    }
+
+    func testRobloxNonRoutableIsPoisoned() {
+        let t = DNSHealthChecker.targets
+        for ip in ["0.0.0.0", "127.0.0.1"] {
+            let results = DNSHealthEvaluator.evaluateAll([(t[0], realDiscord, realDiscord), (t[2], [ip], nil)])
+            XCTAssertEqual(results[0].1, .ok)
+            XCTAssertEqual(results[1].1, .poisoned(systemIPs: [ip], expectedIPs: []), ip)
+        }
+        // Discord doğru, Roblox gerçek adres: mevcut davranış korunur
+        let ok = DNSHealthEvaluator.evaluateAll([(t[0], realDiscord, realDiscord), (t[2], ["128.116.21.3"], nil)])
+        XCTAssertEqual(ok[1].1, .ok)
+        // Fake-IP / iç ağ adresleri engelleme sayılmaz
+        XCTAssertTrue(DNSHealthEvaluator.isNonRoutable("0.0.0.0"))
+        XCTAssertTrue(DNSHealthEvaluator.isNonRoutable("127.0.0.1"))
+        XCTAssertFalse(DNSHealthEvaluator.isNonRoutable("198.18.0.5"))
+        XCTAssertFalse(DNSHealthEvaluator.isNonRoutable("10.0.0.1"))
+        XCTAssertFalse(DNSHealthEvaluator.isNonRoutable("128.116.21.3"))
+        XCTAssertFalse(DNSHealthEvaluator.isNonRoutable("::1"))
+    }
+
+    func testDiscordTargetComparesWithDoH() {
+        let discord = DNSCheckTarget(host: "discord.com", service: "Discord", rule: .compareWithDoH)
+        XCTAssertEqual(DNSHealthEvaluator.evaluate(discord, systemIPs: ["10.0.0.1"], dohIPs: realDiscord),
+                       .poisoned(systemIPs: ["10.0.0.1"], expectedIPs: realDiscord))
+        XCTAssertEqual(DNSHealthEvaluator.evaluate(discord, systemIPs: ["10.0.0.1"], dohIPs: nil), .unknown)
+    }
+
+    func testCheckedTargets() {
+        XCTAssertEqual(DNSHealthChecker.hosts, ["discord.com", "gateway.discord.gg", "www.roblox.com"])
+        XCTAssertEqual(DNSHealthChecker.services, ["Discord", "Roblox"])
+        XCTAssertEqual(DNSHealthChecker.targets.last?.rule, .knownBlockIPOnly)
+        XCTAssertTrue(DNSHealthEvaluator.knownBlockIPs.contains("195.175.254.2"))
+    }
+
+    func testAffectedServicesAndHosts() {
+        let targets = DNSHealthChecker.targets
+        let block = DNSHealthState.poisoned(systemIPs: ["195.175.254.2"], expectedIPs: [])
+        let all = [(targets[0], block), (targets[1], block), (targets[2], block)]
+        XCTAssertEqual(DNSHealthEvaluator.affectedServices(all), ["Discord", "Roblox"])
+        XCTAssertEqual(DNSHealthEvaluator.affectedHosts(all), ["discord.com", "gateway.discord.gg", "www.roblox.com"])
+
+        let robloxOnly = [(targets[0], DNSHealthState.ok), (targets[1], .unknown), (targets[2], block)]
+        XCTAssertEqual(DNSHealthEvaluator.affectedServices(robloxOnly), ["Roblox"])
+        XCTAssertEqual(DNSHealthEvaluator.affectedHosts(robloxOnly), ["www.roblox.com"])
+
+        let none = [(targets[0], DNSHealthState.ok), (targets[2], .ok)]
+        XCTAssertEqual(DNSHealthEvaluator.affectedServices(none), [])
+    }
+
+    func testBannerMessagesNameAffectedServices() {
+        withAppLanguage(.turkish) {
+            let both = DNSHealthBanner.blockedMessage(services: ["Discord", "Roblox"],
+                                                      hosts: ["discord.com", "www.roblox.com"],
+                                                      systemIPs: ["195.175.254.2"]).resolved
+            XCTAssertTrue(both.hasPrefix("Discord ve Roblox için DNS sunucunuz"), both)
+            XCTAssertTrue(both.contains("(195.175.254.2)"), both)
+            XCTAssertTrue(both.contains("discord.com, www.roblox.com"), both)
+            let roblox = DNSHealthBanner.blockedMessage(services: ["Roblox"], hosts: ["www.roblox.com"],
+                                                        systemIPs: ["195.175.254.2"]).resolved
+            XCTAssertTrue(roblox.hasPrefix("Roblox için"), roblox)
+            XCTAssertFalse(roblox.contains("Discord"), roblox)
+            XCTAssertEqual(DNSHealthBanner.okMessage(services: ["Discord", "Roblox"]).resolved,
+                           "DNS doğru çözümlüyor (Discord doğrulandı; Roblox engelleme adresine gitmiyor)")
+        }
+        withAppLanguage(.english) {
+            let both = DNSHealthBanner.blockedMessage(services: ["Discord", "Roblox"], hosts: [],
+                                                      systemIPs: ["195.175.254.2"]).resolved
+            XCTAssertTrue(both.hasPrefix("For Discord and Roblox, your DNS server"), both)
+            XCTAssertTrue(both.hasSuffix("ByeDPI can't connect to Discord and Roblox."), both)
+            // Servis bilgisi yoksa Discord varsayılır
+            XCTAssertTrue(DNSHealthBanner.blockedMessage(services: [], hosts: [], systemIPs: ["195.175.254.2"])
+                .resolved.hasPrefix("For Discord,"))
+            XCTAssertEqual(DNSHealthBanner.okMessage(services: ["Discord", "Roblox"]).resolved,
+                           "DNS resolves correctly (Discord verified; Roblox doesn't point to a block page)")
+        }
+    }
+
+    func testLocalizedList() {
+        XCTAssertEqual(LList([]), LT("", ""))
+        XCTAssertEqual(LList(["Discord"]), LT("Discord", "Discord"))
+        XCTAssertEqual(LList(["Discord", "Roblox"]), LT("Discord ve Roblox", "Discord and Roblox"))
+        XCTAssertEqual(LList(["A", "B", "C"]), LT("A, B ve C", "A, B and C"))
+    }
+
     func testNetworkKey() {
         XCTAssertEqual(DNSHealthEvaluator.networkKey("162.159.1.2"), "162.159")
         XCTAssertNil(DNSHealthEvaluator.networkKey("2606:4700::1111"))

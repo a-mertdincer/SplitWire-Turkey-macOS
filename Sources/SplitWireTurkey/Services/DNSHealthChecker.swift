@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-/// Sistem DNS'inin Discord adreslerini doğru çözüp çözmediğinin sonucu.
+/// Sistem DNS'inin Discord ve Roblox adreslerini doğru çözüp çözmediğinin sonucu.
 enum DNSHealthState: Equatable {
     /// Kontrol edilmedi ya da karar verilemedi (ör. DoH'a ulaşılamadı). Asla uyarı göstermez.
     case unknown
@@ -15,6 +15,22 @@ enum DNSHealthState: Equatable {
         if case .poisoned = self { return true }
         return false
     }
+}
+
+/// DNS kontrolünde sorgulanan bir alan adı.
+struct DNSCheckTarget: Equatable, Sendable {
+    enum Rule: Equatable, Sendable {
+        /// Sistem sonucu DoH sonucu ile karşılaştırılır (/16 eşleşmesi) ve bilinen engelleme adresine bakılır.
+        case compareWithDoH
+        /// Yalnızca bilinen engelleme adresine bakılır. CDN adresleri çözümleyicinin konumuna göre
+        /// değişebildiği için (Roblox) farklı bir adres zehirlenme sayılmaz: yanlış alarm olmaz.
+        case knownBlockIPOnly
+    }
+
+    let host: String
+    /// Kullanıcıya gösterilen servis adı (özel isim, çevrilmez).
+    let service: String
+    let rule: Rule
 }
 
 /// Sistem çözümleyicisi ile DoH sonuçlarını karşılaştıran saf mantık (birim testli).
@@ -50,12 +66,81 @@ enum DNSHealthEvaluator {
         return overlaps ? .ok : .poisoned(systemIPs: system, expectedIPs: expected)
     }
 
-    /// Birden çok alan adının sonuçlarını birleştirir: biri bile poisoned ise poisoned,
-    /// hepsi ok ise ok, aksi halde unknown.
+    /// Hiçbir gerçek sunucuya gitmeyen IPv4 adresleri: 0.0.0.0/8 ve 127.0.0.0/8.
+    /// (RFC1918 ve 198.18.0.0/15 bilerek dahil değil: Surge/Clash "fake-IP" modları ve
+    /// iç ağ DNS'leri meşru olarak bunları döndürür.)
+    static func isNonRoutable(_ ip: String) -> Bool {
+        guard isIPv4(ip), let first = ip.split(separator: ".").first.flatMap({ UInt8($0) }) else { return false }
+        return first == 0 || first == 127
+    }
+
+    /// Yalnızca engelleme adreslerine bakan karar (#13, Roblox).
+    /// - Parameters:
+    ///   - extraBlockIPs: Bu kontrolde başka bir alan adı (ör. discord.com) için zehirli bulunan
+    ///     adresler: engelleme sayfası her engelli ad için aynı adresi döndürür.
+    /// - Bilinen/ek engelleme adresi ya da 0.0.0.0/127.x → poisoned; sistem hiç adres
+    ///   döndürmediyse → unknown; aksi halde ok (farklı CDN adresleri alarm vermez).
+    static func evaluateKnownBlockIPOnly(systemIPs: [String], extraBlockIPs: Set<String> = []) -> DNSHealthState {
+        let system = unique(systemIPs)
+        if system.contains(where: { knownBlockIPs.contains($0) || extraBlockIPs.contains($0) || isNonRoutable($0) }) {
+            return .poisoned(systemIPs: system, expectedIPs: [])
+        }
+        return system.isEmpty ? .unknown : .ok
+    }
+
+    /// Hedefin kuralına göre karar. `knownBlockIPOnly` için DoH sonucu kullanılmaz.
+    static func evaluate(_ target: DNSCheckTarget, systemIPs: [String], dohIPs: [String]?,
+                         extraBlockIPs: Set<String> = []) -> DNSHealthState {
+        switch target.rule {
+        case .compareWithDoH: return evaluate(systemIPs: systemIPs, dohIPs: dohIPs)
+        case .knownBlockIPOnly: return evaluateKnownBlockIPOnly(systemIPs: systemIPs, extraBlockIPs: extraBlockIPs)
+        }
+    }
+
+    /// Tüm hedefleri iki geçişte değerlendirir (sonuçlar girdi sırasıyla döner):
+    /// 1. `compareWithDoH` hedefleri (Discord) DoH ile karşılaştırılır.
+    /// 2. Zehirli çıkanların sistem adresleri, `knownBlockIPOnly` hedefleri (Roblox) için
+    ///    ek engelleme adresi olarak kullanılır. Discord (Cloudflare) ile Roblox (128.116/16,
+    ///    Akamai) aynı adresi paylaşmadığı için bu yanlış alarm üretmez.
+    static func evaluateAll(_ inputs: [(target: DNSCheckTarget, systemIPs: [String], dohIPs: [String]?)])
+        -> [(DNSCheckTarget, DNSHealthState)] {
+        var states = [DNSHealthState?](repeating: nil, count: inputs.count)
+        var extraBlockIPs = Set<String>()
+        for (i, input) in inputs.enumerated() where input.target.rule == .compareWithDoH {
+            let state = evaluate(input.target, systemIPs: input.systemIPs, dohIPs: input.dohIPs)
+            if state.isPoisoned { extraBlockIPs.formUnion(input.systemIPs) }
+            states[i] = state
+        }
+        for (i, input) in inputs.enumerated() where input.target.rule == .knownBlockIPOnly {
+            states[i] = evaluate(input.target, systemIPs: input.systemIPs, dohIPs: input.dohIPs,
+                                 extraBlockIPs: extraBlockIPs)
+        }
+        return inputs.enumerated().map { (i, input) in (input.target, states[i] ?? .unknown) }
+    }
+
+    /// Birden çok alan adının sonuçlarını birleştirir: biri bile poisoned ise poisoned
+    /// (tüm zehirlenmiş sonuçların adresleri birleştirilir), hepsi ok ise ok, aksi halde unknown.
     static func combine(_ states: [DNSHealthState]) -> DNSHealthState {
-        if let poisoned = states.first(where: \.isPoisoned) { return poisoned }
+        let poisoned = states.compactMap { state -> ([String], [String])? in
+            if case .poisoned(let system, let expected) = state { return (system, expected) }
+            return nil
+        }
+        if !poisoned.isEmpty {
+            return .poisoned(systemIPs: unique(poisoned.flatMap(\.0)),
+                             expectedIPs: unique(poisoned.flatMap(\.1)))
+        }
         if !states.isEmpty, states.allSatisfy({ $0 == .ok }) { return .ok }
         return .unknown
+    }
+
+    /// Zehirlenmiş sonuçların servis adları (hedef sırasıyla, tekrarsız): ["Discord", "Roblox"].
+    static func affectedServices(_ results: [(DNSCheckTarget, DNSHealthState)]) -> [String] {
+        unique(results.filter { $0.1.isPoisoned }.map(\.0.service))
+    }
+
+    /// Zehirlenmiş alan adları (hedef sırasıyla).
+    static func affectedHosts(_ results: [(DNSCheckTarget, DNSHealthState)]) -> [String] {
+        unique(results.filter { $0.1.isPoisoned }.map(\.0.host))
     }
 
     /// IPv4 için ilk iki oktet ("162.159"); geçersiz/IPv6 ise nil.
@@ -87,16 +172,26 @@ enum DNSHealthEvaluator {
     }
 }
 
-/// Discord alan adlarının sistem DNS'i tarafından zehirlenip zehirlenmediğini kontrol eder.
+/// Discord ve Roblox alan adlarının sistem DNS'i tarafından zehirlenip zehirlenmediğini kontrol eder.
 ///
-/// ISS DNS'i discord.com için engelleme sayfası adresini döndürür; ciadpi hedefleri sistem
-/// çözümleyicisiyle çözdüğü için ByeDPI bu durumda Discord'a bağlanamaz.
+/// ISS DNS'i discord.com ve www.roblox.com için engelleme sayfası adresini döndürür; ciadpi
+/// hedefleri (SOCKS ve HTTP CONNECT) sistem çözümleyicisiyle çözdüğü için ByeDPI bu durumda
+/// bu servislere bağlanamaz.
 @MainActor
 final class DNSHealthChecker: ObservableObject {
     static let shared = DNSHealthChecker()
 
-    /// Kontrol edilen alan adları.
-    nonisolated static let hosts = ["discord.com", "gateway.discord.gg"]
+    /// Kontrol edilen alan adları (sıra = uyarıdaki sıra).
+    nonisolated static let targets: [DNSCheckTarget] = [
+        DNSCheckTarget(host: "discord.com", service: "Discord", rule: .compareWithDoH),
+        DNSCheckTarget(host: "gateway.discord.gg", service: "Discord", rule: .compareWithDoH),
+        DNSCheckTarget(host: "www.roblox.com", service: "Roblox", rule: .knownBlockIPOnly),
+    ]
+
+    nonisolated static var hosts: [String] { targets.map(\.host) }
+
+    /// Kontrol edilen servis adları (tekrarsız, sıralı): ["Discord", "Roblox"].
+    nonisolated static var services: [String] { DNSHealthEvaluator.unique(targets.map(\.service)) }
 
     /// DoH JSON uç noktaları; IP adresli olanlar önce (DNS'e ihtiyaç duymazlar).
     nonisolated static let dohEndpoints = [
@@ -110,8 +205,9 @@ final class DNSHealthChecker: ObservableObject {
     @Published private(set) var state: DNSHealthState = .unknown
     /// En son tamamlanan kontrolün sonucu (kontrol sürerken banner'ın kaybolmaması için).
     @Published private(set) var lastResult: DNSHealthState = .unknown
-    /// Zehirlenmiş alan adı (uyarı metninde gösterilir).
-    @Published private(set) var affectedHost: String = "discord.com"
+    /// Zehirlenmiş alan adları ve servisler (uyarı metninde gösterilir).
+    @Published private(set) var affectedHosts: [String] = []
+    @Published private(set) var affectedServices: [String] = []
     @Published private(set) var lastChecked: Date?
 
     var isChecking: Bool { state == .checking }
@@ -145,27 +241,31 @@ final class DNSHealthChecker: ObservableObject {
         guard !isChecking else { return }
         state = .checking
 
-        let results = await withTaskGroup(of: (String, DNSHealthState).self) { group in
-            for host in Self.hosts {
+        typealias Lookup = (target: DNSCheckTarget, systemIPs: [String], dohIPs: [String]?)
+        let lookups = await withTaskGroup(of: Lookup.self) { group in
+            for target in Self.targets {
                 group.addTask {
-                    async let system = Self.resolveSystemIPv4(host)
-                    async let doh = Self.resolveDoH(host)
-                    let state = DNSHealthEvaluator.evaluate(systemIPs: await system, dohIPs: await doh)
-                    return (host, state)
+                    async let system = Self.resolveSystemIPv4(target.host)
+                    // Yalnızca engelleme adresine bakan hedefler için DoH sorgusu gerekmez
+                    var doh: [String]?
+                    if target.rule == .compareWithDoH {
+                        doh = await Self.resolveDoH(target.host)
+                    }
+                    return (target, await system, doh)
                 }
             }
-            var collected: [(String, DNSHealthState)] = []
+            var collected: [Lookup] = []
             for await item in group { collected.append(item) }
             // Sabit sıra: discord.com önce
             return collected.sorted { a, b in
-                (Self.hosts.firstIndex(of: a.0) ?? 0) < (Self.hosts.firstIndex(of: b.0) ?? 0)
+                (Self.targets.firstIndex(of: a.target) ?? 0) < (Self.targets.firstIndex(of: b.target) ?? 0)
             }
         }
+        let results = DNSHealthEvaluator.evaluateAll(lookups)
 
         let combined = DNSHealthEvaluator.combine(results.map(\.1))
-        if let poisoned = results.first(where: { $0.1.isPoisoned }) {
-            affectedHost = poisoned.0
-        }
+        affectedHosts = DNSHealthEvaluator.affectedHosts(results)
+        affectedServices = DNSHealthEvaluator.affectedServices(results)
         lastResult = combined
         state = combined
         lastChecked = Date()

@@ -113,7 +113,7 @@ final class ByeDPIServiceIntegrationTests: XCTestCase {
         XCTAssertTrue(service.isRunning)
         XCTAssertFalse(service.isExternallyStarted)
         XCTAssertEqual(service.runningPreset, "Split 1")
-        XCTAssertEqual(service.runningArgs, "-i 127.0.0.1 -p \(testPort) -s 1 --tlsrec 1+s")
+        XCTAssertEqual(service.runningArgs, "-i 127.0.0.1 -p \(testPort) -G -s 1 --tlsrec 1+s")
         XCTAssertEqual(service.statusKind, .success)
 
         let listeners = await ByeDPIService.listeners(port: testPort)
@@ -122,7 +122,7 @@ final class ByeDPIServiceIntegrationTests: XCTestCase {
         // Preset değişimi çalışırken yeniden başlatır
         service.selectPreset("OOB")
         try await waitUntil { service.runningPreset == "OOB" && !service.isProcessing }
-        XCTAssertEqual(service.runningArgs, "-i 127.0.0.1 -p \(testPort) -o 1 --auto=torst")
+        XCTAssertEqual(service.runningArgs, "-i 127.0.0.1 -p \(testPort) -G -o 1 --auto=torst")
         let afterRestart = await ByeDPIService.listeners(port: testPort)
         XCTAssertEqual(afterRestart.filter(\.isCiadpi).count, 1)
 
@@ -169,14 +169,15 @@ final class ByeDPIServiceIntegrationTests: XCTestCase {
         try await waitUntil { !orphan.isRunning }
     }
 
-    /// Her hazır presetin son argv'si (-i 127.0.0.1 -p <port> eklenmiş) gerçek ciadpi tarafından kabul edilir
-    /// ve süreç yalnızca 127.0.0.1 üzerinde dinler (LAN'a açık SOCKS proxy olmaz).
+    /// Her hazır presetin son argv'si (-i 127.0.0.1 -p <port> -G eklenmiş) gerçek ciadpi tarafından kabul edilir,
+    /// süreç yalnızca 127.0.0.1 üzerinde dinler (LAN'a açık SOCKS proxy olmaz) ve aynı port hem SOCKS5
+    /// hem HTTP CONNECT el sıkışmasını kabul eder (sistem HTTPS proxy'si için, #13).
     func testEveryPresetStartsAndListensOnLoopbackOnly() async throws {
         guard let path = ciadpiPath else { throw XCTSkip("ciadpi bulunamadı") }
         for (index, preset) in ByeDPIPresets.builtIn.enumerated() {
             let port = 18_600 + index
             let tokens = ByeDPIArguments.build(from: preset.args, port: port)
-            XCTAssertEqual(Array(tokens.prefix(4)), ["-i", "127.0.0.1", "-p", String(port)], preset.id)
+            XCTAssertEqual(Array(tokens.prefix(5)), ["-i", "127.0.0.1", "-p", String(port), "-G"], preset.id)
 
             let errorPipe = Pipe()
             let process = Process()
@@ -207,7 +208,54 @@ final class ByeDPIServiceIntegrationTests: XCTestCase {
                 .filter { $0.hasPrefix("n") }
                 .map { String($0.dropFirst()) }
             XCTAssertEqual(addresses, ["127.0.0.1:\(port)"], preset.id)
+
+            // SOCKS5 selamlaşması: [ver 5, 1 yöntem, kimlik doğrulamasız] -> [5, 0]
+            let socksReply = Self.exchange(port: port, request: [0x05, 0x01, 0x00], maxBytes: 2)
+            XCTAssertEqual(socksReply, [0x05, 0x00], "\(preset.id): SOCKS5")
+
+            // HTTP CONNECT: ciadpi bağlantıyı kapatmak yerine bir HTTP durum satırıyla yanıt vermeli
+            // (hedefe ulaşılırsa 200, ulaşılamazsa 503). -G olmadan yanıt boş gelir.
+            let connect = "CONNECT 127.0.0.1:9 HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n"
+            let httpReply = String(decoding: Self.exchange(port: port, request: Array(connect.utf8), maxBytes: 64),
+                                   as: UTF8.self)
+            XCTAssertTrue(httpReply.hasPrefix("HTTP/1.1 "), "\(preset.id): HTTP CONNECT yanıtı: \(httpReply.debugDescription)")
         }
+    }
+
+    /// 127.0.0.1:<port>'a bağlanır, isteği gönderir ve en fazla `maxBytes` bayt yanıt okur (2 sn zaman aşımı).
+    nonisolated private static func exchange(port: Int, request: [UInt8], maxBytes: Int) -> [UInt8] {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return [] }
+        defer { close(fd) }
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var noSigPipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connected == 0 else { return [] }
+        guard request.withUnsafeBytes({ send(fd, $0.baseAddress, $0.count, 0) }) == request.count else { return [] }
+
+        var reply: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: maxBytes)
+        while reply.count < maxBytes {
+            let n = buffer.withUnsafeMutableBytes { recv(fd, $0.baseAddress, maxBytes - reply.count, 0) }
+            guard n > 0 else { break }
+            reply.append(contentsOf: buffer[0..<n])
+            if reply.count >= 2, reply.starts(with: [0x05]) { break }
+            if reply.contains(0x0A) { break }  // HTTP durum satırı tamamlandı
+        }
+        return reply
     }
 
     private func waitUntil(timeout: TimeInterval = 5, _ condition: @MainActor () -> Bool) async throws {

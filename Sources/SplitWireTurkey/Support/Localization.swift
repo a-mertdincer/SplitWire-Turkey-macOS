@@ -133,6 +133,16 @@ func LT(_ tr: String, _ en: String) -> LocalizedText {
     LocalizedText(tr: tr, en: en)
 }
 
+/// Adları doğal bir listeye çevirir: TR "A, B ve C", EN "A, B and C".
+/// Adlar (Discord, Roblox, alan adları) çevrilmez; yalnızca bağlaç değişir.
+func LList(_ items: [String]) -> LocalizedText {
+    func join(_ conjunction: String) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " \(conjunction) " + items[items.count - 1]
+    }
+    return LocalizedText(tr: join("ve"), en: join("and"))
+}
+
 /// Kilitli önbellek (servisler ana aktör dışından da `L` çağırabilir).
 private final class LanguageStorage: @unchecked Sendable {
     private let lock = NSLock()

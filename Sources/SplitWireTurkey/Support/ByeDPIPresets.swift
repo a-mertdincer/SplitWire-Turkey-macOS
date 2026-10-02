@@ -123,8 +123,24 @@ enum ByeDPIArguments {
         }
     }
 
+    /// `-G` / `--http-connect`: aynı port hem SOCKS5 hem HTTP CONNECT kabul eder (#13).
+    static let httpConnectFlag = "-G"
+
+    static func containsHTTPConnect(_ tokens: [String]) -> Bool {
+        tokens.contains { $0 == "-G" || $0 == "--http-connect" }
+    }
+
+    /// Çalışan bir ciadpi'nin komut satırı (`ps -o args=`) HTTP CONNECT desteği içeriyor mu?
+    /// Komut satırı bilinmiyorsa false (HTTPS proxy güvenle ona yönlendirilemez).
+    static func commandLineSupportsHTTPConnect(_ commandLine: String?) -> Bool {
+        guard let commandLine else { return false }
+        return containsHTTPConnect(tokenize(commandLine))
+    }
+
     /// ciadpi'ye verilecek son argüman dizisi.
     /// `-i 127.0.0.1` (LAN'a açık proxy olmasın diye) ve `-p 1080` yoksa eklenir.
+    /// `-G` de yoksa eklenir: sistem HTTPS proxy'si (Secure Web Proxy) aynı porta HTTP CONNECT
+    /// ile bağlanır; SOCKS5 istemcileri etkilenmez (ciadpi önce SOCKS sürüm baytına bakar).
     static func build(from text: String, host: String = defaultHost, port: Int = defaultPort) -> [String] {
         var tokens = tokenize(text)
         if !containsListenIP(tokens) {
@@ -135,7 +151,29 @@ enum ByeDPIArguments {
             let insertAt = tokens.first == "-i" ? 2 : 0
             tokens.insert(contentsOf: ["-p", String(port)], at: min(insertAt, tokens.count))
         }
+        if !containsHTTPConnect(tokens) {
+            // Dinleme seçeneklerinin hemen arkasına (yöntem parametrelerinden önce) ekle
+            let insertAt = listenPrefixLength(tokens)
+            tokens.insert(httpConnectFlag, at: insertAt)
+        }
         return tokens
+    }
+
+    /// Baştaki `-i/--ip` ve `-p/--port` seçeneklerinin (değerleriyle) kapladığı token sayısı.
+    private static func listenPrefixLength(_ tokens: [String]) -> Int {
+        var index = 0
+        while index < tokens.count {
+            let token = tokens[index]
+            if token == "-i" || token == "-p" || token == "--ip" || token == "--port" {
+                index += 2
+            } else if token.hasPrefix("--ip=") || token.hasPrefix("--port=")
+                        || (token.count > 2 && (token.hasPrefix("-i") || token.hasPrefix("-p")) && !token.hasPrefix("--")) {
+                index += 1
+            } else {
+                break
+            }
+        }
+        return min(index, tokens.count)
     }
 
     /// Görüntüleme için argüman dizisini tek satıra çevirir (boşluk içerenleri tırnaklar).

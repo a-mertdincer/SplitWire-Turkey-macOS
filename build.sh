@@ -9,7 +9,7 @@
 # Usage:
 #   ./build.sh [VERSION] [--skip-zip] [--arch-native] [--clean]
 #
-#   VERSION        Marketing version (CFBundleShortVersionString). Default: $VERSION or 1.1.0
+#   VERSION        Marketing version (CFBundleShortVersionString). Default: $VERSION or 1.1.1
 #   --skip-zip     Build, sign and verify the .app but do not create the release zip.
 #   --arch-native  Fast development build for this Mac's architecture only (implies --skip-zip,
 #                  so an arm64-only build can never be mistaken for the universal release).
@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-VERSION="${VERSION_ARG:-${VERSION:-1.1.0}}"
+VERSION="${VERSION_ARG:-${VERSION:-1.1.1}}"
 VERSION="${VERSION#v}"   # accept "v1.1.0"
 [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] \
     || die "invalid VERSION '$VERSION' (expected e.g. 1.1.0)"

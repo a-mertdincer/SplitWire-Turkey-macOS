@@ -242,15 +242,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard listeners.isEmpty, !byedpi.isRunning, !isTerminating else { return }
 
         NSApp.activate(ignoringOtherApps: true)
-        let serviceList = services.joined(separator: ", ")
+        // Ör. "Wi-Fi: SOCKS + HTTPS" (v1.1.0'dan kalma ayarda yalnızca "Wi-Fi: SOCKS")
+        let serviceList = SystemProxyService.shared.activeSummary
         let alert = NSAlert()
         alert.messageText = L(
             "Sistem proxy açık ama ByeDPI çalışmıyor",
             "System proxy is on, but ByeDPI isn't running"
         )
         alert.informativeText = L(
-            "Sistem SOCKS proxy ayarı (\(serviceList)) ByeDPI'ı (\(byedpi.proxyAddress)) gösteriyor, ancak ByeDPI çalışmıyor. Bu durumda internet bağlantınız çalışmaz.\n\nByeDPI'ı başlatabilir veya sistem proxy'yi kapatabilirsiniz.",
-            "The system SOCKS proxy setting (\(serviceList)) points to ByeDPI (\(byedpi.proxyAddress)), but ByeDPI isn't running, so your internet connection won't work.\n\nYou can start ByeDPI or turn off the system proxy."
+            "Sistem proxy ayarı (\(serviceList)) ByeDPI'ı (\(byedpi.proxyAddress)) gösteriyor, ancak ByeDPI çalışmıyor. Bu durumda internet bağlantınız çalışmaz.\n\nByeDPI'ı başlatabilir veya sistem proxy'yi kapatabilirsiniz.",
+            "The system proxy setting (\(serviceList)) points to ByeDPI (\(byedpi.proxyAddress)), but ByeDPI isn't running, so your internet connection won't work.\n\nYou can start ByeDPI or turn off the system proxy."
         )
         alert.alertStyle = .warning
         alert.addButton(withTitle: L("ByeDPI'ı Başlat", "Start ByeDPI"))

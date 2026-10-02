@@ -49,7 +49,7 @@ struct AboutView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         FeatureRow(
                             icon: "shield.checkered",
-                            text: L("ByeDPI ile DPI aşımı (yerel SOCKS5 proxy)", "DPI bypass with ByeDPI (local SOCKS5 proxy)")
+                            text: L("ByeDPI ile DPI aşımı (yerel SOCKS5 ve HTTPS proxy)", "DPI bypass with ByeDPI (local SOCKS5 and HTTPS proxy)")
                         )
                         FeatureRow(
                             icon: "app.badge",

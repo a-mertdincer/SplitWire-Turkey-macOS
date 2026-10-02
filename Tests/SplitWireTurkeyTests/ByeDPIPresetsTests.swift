@@ -117,27 +117,27 @@ final class ByeDPIArgumentsTests: XCTestCase {
     func testBuildInjectsIPAndPort() {
         XCTAssertEqual(
             ByeDPIArguments.build(from: "-r 1+s"),
-            ["-i", "127.0.0.1", "-p", "1080", "-r", "1+s"]
+            ["-i", "127.0.0.1", "-p", "1080", "-G", "-r", "1+s"]
         )
-        XCTAssertEqual(ByeDPIArguments.build(from: ""), ["-i", "127.0.0.1", "-p", "1080"])
+        XCTAssertEqual(ByeDPIArguments.build(from: ""), ["-i", "127.0.0.1", "-p", "1080", "-G"])
     }
 
     func testBuildRespectsExistingIPAndPort() {
         XCTAssertEqual(
             ByeDPIArguments.build(from: "-i 0.0.0.0 -s 1"),
-            ["-i", "0.0.0.0", "-p", "1080", "-s", "1"]
+            ["-i", "0.0.0.0", "-p", "1080", "-G", "-s", "1"]
         )
         XCTAssertEqual(
             ByeDPIArguments.build(from: "--ip=127.0.0.1 --port 2080 -s 1"),
-            ["--ip=127.0.0.1", "--port", "2080", "-s", "1"]
+            ["--ip=127.0.0.1", "--port", "2080", "-G", "-s", "1"]
         )
         XCTAssertEqual(
             ByeDPIArguments.build(from: "-p 1081 -r 1+s"),
-            ["-i", "127.0.0.1", "-p", "1081", "-r", "1+s"]
+            ["-i", "127.0.0.1", "-p", "1081", "-G", "-r", "1+s"]
         )
         XCTAssertEqual(
             ByeDPIArguments.build(from: "--port=1090\n--ip 127.0.0.1"),
-            ["--port=1090", "--ip", "127.0.0.1"]
+            ["--port=1090", "--ip", "127.0.0.1", "-G"]
         )
         XCTAssertTrue(ByeDPIArguments.containsPort(["-p1090"]))
         XCTAssertTrue(ByeDPIArguments.containsListenIP(["-i127.0.0.1"]))
@@ -146,11 +146,45 @@ final class ByeDPIArgumentsTests: XCTestCase {
         XCTAssertFalse(ByeDPIArguments.containsPort(["--pf", "443", "--proto", "tls"]))
     }
 
+    /// #13: -G (HTTP CONNECT) her zaman eklenir; kullanıcı zaten verdiyse tekrarlanmaz.
+    func testBuildAddsHTTPConnectOnce() {
+        for preset in ByeDPIPresets.builtIn {
+            let tokens = ByeDPIArguments.build(from: preset.args)
+            XCTAssertEqual(tokens.filter { $0 == "-G" }.count, 1, preset.id)
+            XCTAssertEqual(Array(tokens.prefix(5)), ["-i", "127.0.0.1", "-p", "1080", "-G"], preset.id)
+            XCTAssertEqual(Array(tokens.dropFirst(5)), ByeDPIArguments.tokenize(preset.args), preset.id)
+        }
+        XCTAssertEqual(
+            ByeDPIArguments.build(from: "-s 1 -G"),
+            ["-i", "127.0.0.1", "-p", "1080", "-s", "1", "-G"]
+        )
+        XCTAssertEqual(
+            ByeDPIArguments.build(from: "--http-connect -r 1+s"),
+            ["-i", "127.0.0.1", "-p", "1080", "--http-connect", "-r", "1+s"]
+        )
+        XCTAssertEqual(
+            ByeDPIArguments.build(from: "-i127.0.0.1 -p1090 -o 1"),
+            ["-i127.0.0.1", "-p1090", "-G", "-o", "1"]
+        )
+        XCTAssertTrue(ByeDPIArguments.containsHTTPConnect(["--http-connect"]))
+        XCTAssertFalse(ByeDPIArguments.containsHTTPConnect(["-g", "--http-connection"]))
+    }
+
+    /// Harici (ör. v1.1.0 ile başlatılmış) ciadpi -G olmadan çalışıyorsa HTTPS proxy ona yönlendirilmez.
+    func testCommandLineSupportsHTTPConnect() {
+        XCTAssertTrue(ByeDPIArguments.commandLineSupportsHTTPConnect(
+            "/Applications/SplitWire-Turkey.app/Contents/Resources/bin/ciadpi -i 127.0.0.1 -p 1080 -G -r 1+s"))
+        XCTAssertTrue(ByeDPIArguments.commandLineSupportsHTTPConnect("ciadpi --http-connect -s 1"))
+        XCTAssertFalse(ByeDPIArguments.commandLineSupportsHTTPConnect("ciadpi -i 127.0.0.1 -p 1080 -r 1+s"))
+        XCTAssertFalse(ByeDPIArguments.commandLineSupportsHTTPConnect("ciadpi (PID 123)"))
+        XCTAssertFalse(ByeDPIArguments.commandLineSupportsHTTPConnect(nil))
+    }
+
     func testCustomArgsMultilineBuild() {
         let args = ByeDPIPresets.args(for: "Custom", customArgs: "-s 1+s\n-d 3+s\n--tlsrec 1+s")
         XCTAssertEqual(
             ByeDPIArguments.build(from: args),
-            ["-i", "127.0.0.1", "-p", "1080", "-s", "1+s", "-d", "3+s", "--tlsrec", "1+s"]
+            ["-i", "127.0.0.1", "-p", "1080", "-G", "-s", "1+s", "-d", "3+s", "--tlsrec", "1+s"]
         )
     }
 

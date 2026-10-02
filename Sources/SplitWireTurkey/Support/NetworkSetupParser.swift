@@ -17,8 +17,9 @@ struct NetworkServiceEntry: Equatable {
     let isEnabled: Bool
 }
 
-/// `networksetup -getsocksfirewallproxy <servis>` çıktısı.
-struct SocksProxySettings: Equatable {
+/// `networksetup -getsocksfirewallproxy <servis>` veya `-getsecurewebproxy <servis>` çıktısı
+/// (ikisinin biçimi aynıdır: Enabled / Server / Port).
+struct ProxySettings: Equatable {
     let enabled: Bool
     let server: String
     let port: Int?
@@ -27,7 +28,12 @@ struct SocksProxySettings: Equatable {
     func pointsTo(host: String = ByeDPIArguments.defaultHost, port: Int = ByeDPIArguments.defaultPort) -> Bool {
         enabled && server == host && self.port == port
     }
+
+    static let off = ProxySettings(enabled: false, server: "", port: nil)
 }
+
+/// v1.1.0 adı (yalnızca SOCKS proxy vardı).
+typealias SocksProxySettings = ProxySettings
 
 /// `route`/`networksetup` çıktıları için saf ayrıştırıcılar (birim testli).
 enum NetworkSetupParser {
@@ -128,7 +134,16 @@ enum NetworkSetupParser {
     ///     Server: 127.0.0.1
     ///     Port: 1080
     ///     Authenticated Proxy Enabled: 0
-    static func parseSocksProxy(_ output: String) -> SocksProxySettings {
+    static func parseSocksProxy(_ output: String) -> ProxySettings {
+        parseProxySettings(output)
+    }
+
+    /// `networksetup -getsecurewebproxy <servis>` (HTTPS / Secure Web Proxy) çıktısı; biçim SOCKS ile aynıdır.
+    static func parseSecureWebProxy(_ output: String) -> ProxySettings {
+        parseProxySettings(output)
+    }
+
+    static func parseProxySettings(_ output: String) -> ProxySettings {
         var enabled = false
         var server = ""
         var port: Int?
@@ -144,7 +159,7 @@ enum NetworkSetupParser {
             default: break
             }
         }
-        return SocksProxySettings(enabled: enabled, server: server, port: port)
+        return ProxySettings(enabled: enabled, server: server, port: port)
     }
 }
 

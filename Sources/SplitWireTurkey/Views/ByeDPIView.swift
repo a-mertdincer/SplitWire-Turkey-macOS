@@ -90,7 +90,7 @@ struct ByeDPIView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(L("SOCKS5 Proxy Adresi:", "SOCKS5 proxy address:"))
+                        Text(L("Proxy Adresi (SOCKS5 ve HTTPS):", "Proxy address (SOCKS5 and HTTPS):"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Text(byedpiService.proxyAddress)
@@ -141,7 +141,7 @@ struct ByeDPIView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "network")
                                 .foregroundColor(.green)
-                            let services = systemProxy.activeServices.joined(separator: ", ")
+                            let services = systemProxy.activeSummary
                             Text(L("Sistem proxy açık (\(services)). ByeDPI durdurulduğunda otomatik kapatılır.",
                                    "System proxy is on (\(services)). It turns off automatically when ByeDPI stops."))
                                 .font(.caption)
@@ -311,8 +311,8 @@ struct ByeDPIView: View {
                             .cornerRadius(4)
 
                         HStack {
-                            Text(L("Örnek: -s 1 --tlsrec 1+s   (-i 127.0.0.1 ve -p 1080 otomatik eklenir)",
-                                   "Example: -s 1 --tlsrec 1+s   (-i 127.0.0.1 and -p 1080 are added automatically)"))
+                            Text(L("Örnek: -s 1 --tlsrec 1+s   (-i 127.0.0.1, -p 1080 ve -G otomatik eklenir)",
+                                   "Example: -s 1 --tlsrec 1+s   (-i 127.0.0.1, -p 1080 and -G are added automatically)"))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -386,11 +386,15 @@ struct ByeDPIView: View {
 
                 // Markdown (**kalın**) içerdiği için LocalizedStringKey ile gösterilir.
                 Text(LocalizedStringKey(L(
-                    "**Not:** ByeDPI yerel bir SOCKS5 proxy (\(byedpiService.proxyAddress)) oluşturur. Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda (Discord, Chrome, Brave, Edge, Slack, Spotify…) çalışır. Safari, Roblox ve oyunlar gibi diğer uygulamalar için 'Sistem Proxy' veya WireGuard kullanın.",
-                    "**Note:** ByeDPI creates a local SOCKS5 proxy (\(byedpiService.proxyAddress)). The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). For other apps such as Safari, Roblox and games, use 'System proxy' or WireGuard."
+                    "**Not:** ByeDPI yerel bir proxy (\(byedpiService.proxyAddress), SOCKS5 ve HTTPS) oluşturur. Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda (Discord, Chrome, Brave, Edge, Slack, Spotify…) çalışır. Safari, Roblox ve oyunlar gibi diğer uygulamalar için 'Sistem Proxy' veya WireGuard kullanın.",
+                    "**Note:** ByeDPI creates a local proxy (\(byedpiService.proxyAddress), SOCKS5 and HTTPS). The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). For other apps such as Safari, Roblox and games, use 'System proxy' or WireGuard."
                 )))
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Divider()
+
+                RobloxGuideNote()
             }
             .padding()
         }
@@ -657,8 +661,8 @@ struct AppEditorView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Text(L("Not: Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda çalışır (Discord, Chrome, Brave, Edge, Slack, Spotify…). Safari, Roblox ve oyunlar gibi diğer uygulamalar bu parametreyi yok sayar; bunlar için 'Sistem Proxy' veya WireGuard kullanın.",
-                       "Note: The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). Other apps such as Safari, Roblox and games ignore it; use 'System proxy' or WireGuard for them."))
+                Text(L("Not: Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda çalışır (Discord, Chrome, Brave, Edge, Slack, Spotify…). Safari, Roblox ve oyunlar gibi diğer uygulamalar bu parametreyi yok sayar; bunlar için 'Sistem Proxy' (SOCKS + HTTPS) veya WireGuard kullanın.",
+                       "Note: The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). Other apps such as Safari, Roblox and games ignore it; use 'System proxy' (SOCKS + HTTPS) or WireGuard for them."))
                     .font(.caption)
                     .foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
@@ -689,7 +693,7 @@ struct AppEditorView: View {
             }
         }
         .padding()
-        .frame(width: 500, height: 420)
+        .frame(width: 500, height: 440)
         .onAppear {
             editedArgs = app.customArgs
         }
@@ -729,8 +733,8 @@ struct SystemProxyConfigView: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 12) {
-                Text(L("Bu seçenek sistem genelinde SOCKS5 proxy (\(byedpiService.proxyAddress)) ayarı yapar; proxy parametresini desteklemeyen uygulamalar (Safari vb.) da ByeDPI üzerinden bağlanır.",
-                       "This option sets a system-wide SOCKS5 proxy (\(byedpiService.proxyAddress)), so apps that don't support the proxy parameter (Safari, etc.) also connect through ByeDPI."))
+                Text(L("Bu seçenek etkin ağ servisinde hem SOCKS proxy hem de güvenli web proxy'si (HTTPS) olarak \(byedpiService.proxyAddress) adresini ayarlar; proxy parametresini desteklemeyen uygulamalar (Safari, Roblox vb.) da ByeDPI üzerinden bağlanabilir. Düz web proxy'si (HTTP) ve proxy istisna listeniz değiştirilmez.",
+                       "This option sets \(byedpiService.proxyAddress) as both the SOCKS proxy and the secure web proxy (HTTPS) on the active network service, so apps that don't support the proxy parameter (Safari, Roblox, etc.) can also connect through ByeDPI. The plain web proxy (HTTP) and your proxy bypass list are not changed."))
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -758,7 +762,7 @@ struct SystemProxyConfigView: View {
                             Circle()
                                 .fill(systemProxy.isOurProxyActive ? Color.green : Color.red)
                                 .frame(width: 8, height: 8)
-                            let services = systemProxy.activeServices.joined(separator: ", ")
+                            let services = systemProxy.activeSummary
                             Text(systemProxy.isOurProxyActive
                                  ? L("Açık (\(services))", "On (\(services))")
                                  : L("Kapalı", "Off"))
@@ -781,7 +785,9 @@ struct SystemProxyConfigView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
-                    .disabled(systemProxy.isBusy || systemProxy.isOurProxyActive
+                    // Yalnızca SOCKS açıksa (v1.1.0'dan kalma) "Aç" HTTPS proxy'yi de ekler
+                    .disabled(systemProxy.isBusy
+                              || (systemProxy.isOurProxyActive && !systemProxy.hasIncompleteSetup)
                               || !byedpiService.isRunning || byedpiService.isProcessing)
 
                     Button(action: {
@@ -805,6 +811,14 @@ struct SystemProxyConfigView: View {
                         .foregroundColor(.secondary)
                 }
 
+                if systemProxy.hasIncompleteSetup {
+                    Text(L("Sistem proxy'nin yalnızca bir kısmı açık (ör. önceki sürümden kalan yalnızca SOCKS ayarı). HTTPS proxy'yi de eklemek için ByeDPI çalışırken 'Aç'a basın.",
+                           "Only part of the system proxy is on (e.g. a SOCKS-only setting left over from the previous version). Press 'Turn on' while ByeDPI is running to add the HTTPS proxy too."))
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if systemProxy.isBusy {
                     HStack {
                         ProgressView()
@@ -819,18 +833,45 @@ struct SystemProxyConfigView: View {
             .background(Color.secondary.opacity(0.1))
             .cornerRadius(8)
 
+            RobloxGuideNote()
+                .padding(.horizontal)
+
             Button(L("Kapat", "Close")) {
                 dismiss()
             }
             .buttonStyle(.bordered)
         }
         .padding()
-        .frame(width: 480, height: 440)
+        .frame(width: 520)
         .onAppear {
             Task {
                 await systemProxy.refresh()
                 isLoading = false
             }
         }
+    }
+}
+
+/// Roblox ve oyunlar için kısa rehber (#13). ByeDPI sekmesinde ve Sistem Proxy sayfasında gösterilir.
+struct RobloxGuideNote: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(L("Roblox ve oyunlar (deneysel)", "Roblox and games (experimental)"), systemImage: "gamecontroller")
+                .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L("1. Önce DNS'i düzeltin: Ağ Ayarları'ndan 1.1.1.1 veya şifreli DNS (DoH) profili.",
+                       "1. Fix DNS first: 1.1.1.1 or the encrypted DNS (DoH) profile in the Network tab."))
+                Text(L("2. ByeDPI'ı başlatın, ardından 'Sistem Proxy'yi açın.",
+                       "2. Start ByeDPI, then turn on 'System proxy'."))
+                Text(L("3. Roblox'u bundan sonra başlatın (açıksa tamamen kapatıp yeniden açın).",
+                       "3. Start Roblox after that (if it is open, quit it completely and reopen it)."))
+            }
+            Text(L("Roblox'ta yalnızca web ve giriş trafiğinin ByeDPI'dan geçmesi, oyun trafiğinin (UDP) ise doğrudan gitmesi beklenir; bu yüzden ping'in etkilenmemesi beklenir. Sistem proxy açıkken bu ayarı kullanan diğer uygulamalar (ör. Safari) da ByeDPI'dan geçer. Bu yol deneyseldir, çünkü Roblox'un macOS proxy ayarlarını kullanmasına bağlıdır. İşe yaramazsa WireGuard sekmesini kullanın (ping daha yüksek olabilir).",
+                   "For Roblox, only web and login traffic is expected to go through ByeDPI, while game traffic (UDP) goes direct, so ping should stay about the same. While the system proxy is on, other apps that use it (such as Safari) also go through ByeDPI. This route is experimental because it depends on Roblox using the macOS proxy settings. If it doesn't work, use the WireGuard tab (ping may be higher)."))
+                .foregroundColor(.secondary)
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

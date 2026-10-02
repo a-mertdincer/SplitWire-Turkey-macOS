@@ -163,23 +163,145 @@ final class NetworkSetupParserTests: XCTestCase {
         XCTAssertEqual(LsofParser.parseListeners("p1\ncciadpi\nu501\nf3").first?.isLoopbackOnly, false)
     }
 
-    func testProxyCommandsQuoteServiceNames() {
-        let disable = SystemProxyService.disableCommand(services: ["Wi-Fi", "USB 10/100 LAN", "Ali's (Ev)"])
-        XCTAssertEqual(
-            disable,
-            "/usr/sbin/networksetup -setsocksfirewallproxystate 'Wi-Fi' off ; "
-            + "/usr/sbin/networksetup -setsocksfirewallproxystate 'USB 10/100 LAN' off ; "
-            + "/usr/sbin/networksetup -setsocksfirewallproxystate 'Ali'\\''s (Ev)' off"
-        )
+    func testParseSecureWebProxy() {
+        // `networksetup -getsecurewebproxy Wi-Fi` gerçek çıktısı (SOCKS ile aynı biçim)
+        let off = NetworkSetupParser.parseSecureWebProxy("Enabled: No\nServer: \nPort: 0\nAuthenticated Proxy Enabled: 0\n")
+        XCTAssertEqual(off, ProxySettings(enabled: false, server: "", port: 0))
+        XCTAssertFalse(off.pointsTo())
+
+        let on = NetworkSetupParser.parseSecureWebProxy("Enabled: Yes\nServer: 127.0.0.1\nPort: 1080\nAuthenticated Proxy Enabled: 0\n")
+        XCTAssertEqual(on, ProxySettings(enabled: true, server: "127.0.0.1", port: 1080))
+        XCTAssertTrue(on.pointsTo())
+
+        let corporate = NetworkSetupParser.parseSecureWebProxy("Enabled: Yes\nServer: proxy.corp.example\nPort: 8080\n")
+        XCTAssertFalse(corporate.pointsTo())
+    }
+
+    func testOurProxyStateDetection() {
+        let ours = ProxySettings(enabled: true, server: "127.0.0.1", port: 1080)
+        let oursButOff = ProxySettings(enabled: false, server: "127.0.0.1", port: 1080)
+        let other = ProxySettings(enabled: true, server: "proxy.corp.example", port: 8080)
+
+        // v1.1.1: ikisi de açık
+        XCTAssertEqual(OurProxyState.detect(service: "Wi-Fi", socks: ours, secureWeb: ours),
+                       OurProxyState(service: "Wi-Fi", socks: true, secureWeb: true))
+        XCTAssertEqual(OurProxyState.detect(service: "Wi-Fi", socks: ours, secureWeb: ours)?.isComplete, true)
+
+        // v1.1.0'dan kalma: yalnızca SOCKS açık -> yine "bizim proxy" (algılanır ve kapatılır)
+        let legacy = OurProxyState.detect(service: "Wi-Fi", socks: ours, secureWeb: .off)
+        XCTAssertEqual(legacy, OurProxyState(service: "Wi-Fi", socks: true, secureWeb: false))
+        XCTAssertEqual(legacy?.isComplete, false)
+
+        // Yarım kalmış açma: yalnızca HTTPS açık
+        XCTAssertEqual(OurProxyState.detect(service: "Wi-Fi", socks: oursButOff, secureWeb: ours),
+                       OurProxyState(service: "Wi-Fi", socks: false, secureWeb: true))
+
+        // Kullanıcının kendi HTTPS proxy'si bizim sayılmaz
+        let mixed = OurProxyState.detect(service: "Wi-Fi", socks: ours, secureWeb: other)
+        XCTAssertEqual(mixed, OurProxyState(service: "Wi-Fi", socks: true, secureWeb: false, hasForeignProxy: true))
+        XCTAssertEqual(mixed?.hasForeignProxy, true)
+        // Kullanıcının proxy'si açıkken "Aç" onu ezmeyeceği için bu durum "yarım ayar" sayılmaz
+        XCTAssertFalse(SystemProxyService.needsCompletion([mixed!]))
+        XCTAssertTrue(SystemProxyService.needsCompletion([legacy!]))
+        XCTAssertFalse(SystemProxyService.needsCompletion([OurProxyState(service: "Wi-Fi", socks: true, secureWeb: true)]))
+        XCTAssertEqual(legacy?.hasForeignProxy, false)
+        XCTAssertNil(OurProxyState.detect(service: "Wi-Fi", socks: other, secureWeb: other))
+        XCTAssertNil(OurProxyState.detect(service: "Wi-Fi", socks: oursButOff, secureWeb: oursButOff))
+        XCTAssertNil(OurProxyState.detect(service: "Wi-Fi", socks: .off, secureWeb: .off))
+
+        // Test portu gerçek 1080 ayarıyla asla eşleşmez
+        XCTAssertNil(OurProxyState.detect(service: "Wi-Fi", socks: ours, secureWeb: ours, port: 41_873))
+    }
+
+    func testForeignProxyIsNeverOverwritten() {
+        let ours = ProxySettings(enabled: true, server: "127.0.0.1", port: 1080)
+        let corporate = ProxySettings(enabled: true, server: "proxy.corp", port: 8080)
+        let corporateOff = ProxySettings(enabled: false, server: "proxy.corp", port: 8080)
+
+        let https = OurProxyState.foreignProxy(socks: ours, secureWeb: corporate)
+        XCTAssertEqual(https?.kind, "HTTPS")
+        XCTAssertEqual(https?.server, "proxy.corp:8080")
+        let socks = OurProxyState.foreignProxy(socks: corporate, secureWeb: .off)
+        XCTAssertEqual(socks?.kind, "SOCKS")
+        XCTAssertEqual(socks?.server, "proxy.corp:8080")
+
+        XCTAssertNil(OurProxyState.foreignProxy(socks: ours, secureWeb: ours))
+        XCTAssertNil(OurProxyState.foreignProxy(socks: .off, secureWeb: .off))
+        XCTAssertNil(OurProxyState.foreignProxy(socks: corporateOff, secureWeb: corporateOff))
+        // Test portu: 1080'deki bizim ayar da "başkası" sayılır (yönetici penceresi açılmaz)
+        XCTAssertEqual(OurProxyState.foreignProxy(socks: .off, secureWeb: ours, port: 41_873)?.kind, "HTTPS")
+
+        withAppLanguage(.english) {
+            let message = SystemProxyError.foreignProxy(service: "Wi-Fi", kind: "HTTPS", server: "proxy.corp:8080")
+                .localizedDescription
+            XCTAssertTrue(message.hasPrefix("Another HTTPS proxy (proxy.corp:8080) is on for Wi-Fi."), message)
+        }
+    }
+
+    /// "Aç", birincil servis dışındaki yarım ayarları da aynı yetkili komutta tamamlar.
+    func testEnableCommandCompletesSeveralServices() {
+        let command = SystemProxyService.enableCommand(services: ["Wi-Fi", "USB 10/100 LAN"])
+        XCTAssertEqual(command.components(separatedBy: "/usr/sbin/lsof").count - 1, 1, command)
+        XCTAssertTrue(command.hasPrefix("/usr/sbin/lsof "), command)
+        for name in ["'Wi-Fi'", "'USB 10/100 LAN'"] {
+            XCTAssertTrue(command.contains("-setsocksfirewallproxy \(name) '127.0.0.1' 1080"), command)
+            XCTAssertTrue(command.contains("-setsecurewebproxy \(name) '127.0.0.1' 1080"), command)
+            XCTAssertTrue(command.contains("-setsocksfirewallproxystate \(name) on"), command)
+            XCTAssertTrue(command.contains("-setsecurewebproxystate \(name) on"), command)
+        }
+        XCTAssertFalse(command.contains("-setwebproxy"), command)
+        XCTAssertFalse(command.contains("bypass"), command)
+        XCTAssertEqual(SystemProxyService.enableCommand(services: ["Wi-Fi"]),
+                       SystemProxyService.enableCommand(service: "Wi-Fi"))
+    }
+
+    func testEnableCommandSetsSocksAndSecureWebProxy() {
         let enable = SystemProxyService.enableCommand(service: "Wi-Fi")
         XCTAssertEqual(
             enable,
             "/usr/sbin/lsof -a -nP -iTCP:1080 -sTCP:LISTEN -c ciadpi -t >/dev/null 2>&1"
             + " || { echo SPLITWIRE_NO_LISTENER >&2; exit 3; } ; "
             + "/usr/sbin/networksetup -setsocksfirewallproxy 'Wi-Fi' '127.0.0.1' 1080 && "
-            + "/usr/sbin/networksetup -setsocksfirewallproxystate 'Wi-Fi' on"
+            + "/usr/sbin/networksetup -setsecurewebproxy 'Wi-Fi' '127.0.0.1' 1080 && "
+            + "/usr/sbin/networksetup -setsocksfirewallproxystate 'Wi-Fi' on && "
+            + "/usr/sbin/networksetup -setsecurewebproxystate 'Wi-Fi' on"
         )
         XCTAssertTrue(SystemProxyService.enableCommand(service: "Wi-Fi", port: 41_873).contains("-iTCP:41873 "))
+
+        let odd = SystemProxyService.enableCommand(service: "Ali's (Ev) $(x)")
+        XCTAssertTrue(odd.contains("-setsocksfirewallproxy 'Ali'\\''s (Ev) $(x)' '127.0.0.1' 1080"), odd)
+        XCTAssertTrue(odd.contains("-setsecurewebproxy 'Ali'\\''s (Ev) $(x)' '127.0.0.1' 1080"), odd)
+        XCTAssertTrue(odd.contains("-setsecurewebproxystate 'Ali'\\''s (Ev) $(x)' on"), odd)
+    }
+
+    func testDisableCommandTurnsOffOnlyOurProxies() {
+        let disable = SystemProxyService.disableCommand(proxies: [
+            OurProxyState(service: "Wi-Fi", socks: true, secureWeb: true),
+            OurProxyState(service: "USB 10/100 LAN", socks: true, secureWeb: false),   // v1.1.0
+            OurProxyState(service: "Ali's (Ev)", socks: false, secureWeb: true),       // yarım kalmış
+        ])
+        XCTAssertEqual(
+            disable,
+            "/usr/sbin/networksetup -setsocksfirewallproxystate 'Wi-Fi' off ; "
+            + "/usr/sbin/networksetup -setsecurewebproxystate 'Wi-Fi' off ; "
+            + "/usr/sbin/networksetup -setsocksfirewallproxystate 'USB 10/100 LAN' off ; "
+            + "/usr/sbin/networksetup -setsecurewebproxystate 'Ali'\\''s (Ev)' off"
+        )
+        XCTAssertEqual(SystemProxyService.disableCommand(proxies: []), "")
+    }
+
+    /// Düz web proxy'si (HTTP) ve bypass listesi hiçbir komutta değiştirilmez.
+    func testProxyCommandsNeverTouchPlainWebProxyOrBypassList() {
+        let commands = [
+            SystemProxyService.enableCommand(service: "Wi-Fi"),
+            SystemProxyService.disableCommand(proxies: [OurProxyState(service: "Wi-Fi", socks: true, secureWeb: true)]),
+        ]
+        for command in commands {
+            XCTAssertFalse(command.contains("-setwebproxy "), command)
+            XCTAssertFalse(command.contains("-setwebproxystate"), command)
+            XCTAssertFalse(command.contains("bypass"), command)
+            XCTAssertFalse(command.contains("autoproxy"), command)
+        }
     }
 
     /// Proxy, ciadpi dinlemiyorsa açılmaz: denetim yalnızca lsof çalıştırır (networksetup'a ulaşılmaz).

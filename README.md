@@ -5,15 +5,16 @@
 <h1 align="center">SplitWire-Turkey (macOS)</h1>
 
 <p align="center">
-  Türkiye'deki DPI ve DNS engellerini (ör. Discord) aşmak için macOS menü çubuğu uygulaması.<br>
-  A macOS menu bar app to get around DPI and DNS blocking in Türkiye (e.g. Discord).
+  Türkiye'deki DPI ve DNS engellerini (ör. Discord, Roblox) aşmak için macOS menü çubuğu uygulaması.<br>
+  A macOS menu bar app to get around DPI and DNS blocking in Türkiye (e.g. Discord, Roblox).
 </p>
 
 <p align="center">
   <a href="#türkçe">Türkçe</a> · <a href="#english">English</a> ·
   <a href="https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases">Releases</a> ·
   <a href="KULLANIM.md">Kullanım kılavuzu</a> ·
-  <a href="RELEASE_NOTES_v1.1.0.md">v1.1.0 notları</a>
+  <a href="RELEASE_NOTES_v1.1.1.md">v1.1.1 notları</a> ·
+  <a href="RELEASE_NOTES_v1.1.0.md">v1.1.0</a>
 </p>
 
 ---
@@ -22,10 +23,10 @@
 
 ### Ne işe yarar?
 
-- **ByeDPI (ciadpi):** Bu Mac'te yerel bir SOCKS5 proxy (`127.0.0.1:1080`) çalıştırır ve operatörün DPI (derin paket inceleme) engelini aşar. Proxy yalnızca bu bilgisayardan erişilebilir; ağdaki diğer cihazlara açık değildir.
+- **ByeDPI (ciadpi):** Bu Mac'te yerel bir proxy (`127.0.0.1:1080`) çalıştırır ve operatörün DPI (derin paket inceleme) engelini aşar. Aynı port hem SOCKS5 hem HTTPS (HTTP CONNECT) bağlantılarını kabul eder. Proxy yalnızca bu bilgisayardan erişilebilir; ağdaki diğer cihazlara açık değildir.
 - **Hızlı İşlemler:** Discord ve diğer Chromium/Electron uygulamalarını tek tıkla proxy ayarıyla başlatır. Uygulama zaten açıksa kapatıp yeniden başlatmayı önerir.
-- **DNS engeli kontrolü:** Açılışta `discord.com` adresinin gerçek adrese mi yoksa engelleme sayfasına mı çözüldüğünü kontrol eder ve sorun varsa uyarır. Tek tıkla Cloudflare DNS (1.1.1.1) ayarı ve şifreli DNS (DoH) profili sunar.
-- **Sistem Proxy (isteğe bağlı):** Proxy parametresini desteklemeyen uygulamalar (Safari vb.) için sistem genelinde SOCKS proxy ayarı. ByeDPI durunca veya uygulamadan çıkınca otomatik kapatılır.
+- **DNS engeli kontrolü:** Açılışta Discord (`discord.com`, `gateway.discord.gg`) adreslerinin gerçek adrese mi yoksa engelleme sayfasına mı çözüldüğünü şifreli DNS ile karşılaştırarak kontrol eder; Roblox (`www.roblox.com`) için bilinen engelleme adreslerine ve Discord'un zehirli bulunduğu adrese bakar. Hangi servislerin etkilendiğini söyleyerek uyarır. Tek tıkla Cloudflare DNS (1.1.1.1) ayarı ve şifreli DNS (DoH) profili sunar.
+- **Sistem Proxy (isteğe bağlı):** Proxy parametresini desteklemeyen uygulamalar (Safari, Roblox vb.) için sistem genelinde SOCKS ve HTTPS proxy ayarı. ByeDPI durunca veya uygulamadan çıkınca otomatik kapatılır.
 - **WireGuard / Cloudflare WARP:** Tüm trafiği Cloudflare WARP üzerinden geçiren tünel (Homebrew `wireguard-tools` gerekir).
 - **Menü çubuğu:** Başlat/durdur, DPI yöntemi seçimi, sistem proxy durumu. Dock simgesi gizlenebilir; arayüz Türkçe veya İngilizce.
 
@@ -38,7 +39,7 @@
 
 ### Kurulum
 
-1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.0.zip` dosyasını indirip açın.
+1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.1.zip` dosyasını indirip açın.
 2. `SplitWire-Turkey.app` dosyasını **Uygulamalar** (Applications) klasörüne sürükleyin.
 3. İlk açılış: Uygulama ad-hoc imzalıdır (Apple Developer ID / notarizasyon yok), bu yüzden macOS geliştiriciyi doğrulayamadığını söyler. Şunlardan birini yapın:
    - macOS 13–14: Uygulamaya sağ tıklayın (Control-tık) > **Aç** > **Aç**.
@@ -77,7 +78,7 @@ Seçiminiz kaydedilir; ana pencere ve menü çubuğu her zaman aynı yöntemi g�
 | Split + Disorder | `-s 1+s -d 3+s --tlsrec 1+s` |
 | Özel (Custom) | Kendi parametreleriniz |
 
-- Tüm yöntemlere `-i 127.0.0.1 -p 1080` otomatik eklenir (Özel parametrelerde `-i`/`-p` yazmadıysanız).
+- Tüm yöntemlere `-i 127.0.0.1 -p 1080 -G` otomatik eklenir (Özel parametrelerde `-i`/`-p`/`-G` yazmadıysanız). `-G` (`--http-connect`), aynı portun SOCKS5'in yanında HTTP CONNECT isteklerini de kabul etmesini sağlar; sistem HTTPS proxy'si bunu kullanır. ciadpi düz HTTP proxy isteklerini (`GET http://…`) karşılayamaz, bu yüzden düz web proxy'si (HTTP) asla ayarlanmaz.
 - **Fake presetleri kaldırıldı:** macOS için derlenen ciadpi sahte paket (fake) gönderemez (`FAKE_SUPPORT` yalnızca Linux/Windows). Daha önce Fake seçtiyseniz ayar Standart'a döner.
 - Önce Standart'ı deneyin. Çoğu durumda asıl sorun DNS'tir; DNS düzeldikten sonra Standart genelde yeterlidir.
 
@@ -89,12 +90,17 @@ Hızlı İşlemler, uygulamayı `--proxy-server=socks5://127.0.0.1:1080` paramet
 |---|---|
 | Chromium/Electron tabanlı (Discord, Chrome, Brave, Edge, Slack, Spotify…) | Hızlı İşlemler'den başlatın. |
 | Safari ve macOS ağ ayarlarını kullanan uygulamalar | Parametreyi yok sayar; **Sistem Proxy**'yi açın. |
-| Roblox, oyunlar ve kendi ağ yığınını kullanan uygulamalar | Parametreyi yok sayar, genellikle sistem SOCKS ayarını da kullanmaz; **WireGuard/WARP** kullanın. |
+| Roblox | Parametreyi yok sayar. Önce deneysel **ByeDPI + Sistem Proxy** yolunu deneyin ([Roblox](#roblox-deneysel)); olmazsa **WireGuard/WARP**. |
+| Oyunlar ve kendi ağ yığınını kullanan diğer uygulamalar | Parametreyi yok sayar, genellikle sistem proxy ayarını da kullanmaz; **WireGuard/WARP** kullanın. |
 | Firefox | Kendi ayarı vardır: Ayarlar > Genel > Ağ Ayarları > Elle proxy yapılandırması: SOCKS sunucusu `127.0.0.1`, port `1080`, SOCKS v5; "SOCKS v5 kullanırken DNS'i proxy üzerinden yap" işaretli. |
 
 ### Sistem Proxy
 
-**Hızlı İşlemler > Sistem Proxy > Aç**, birincil ağ servisinde (ör. Wi-Fi) SOCKS proxy'yi `127.0.0.1:1080` olarak açar.
+**Hızlı İşlemler > Sistem Proxy > Aç**, birincil ağ servisinde (ör. Wi-Fi) hem **SOCKS proxy**'yi hem de **güvenli web proxy'sini (HTTPS)** `127.0.0.1:1080` olarak tek parola penceresiyle açar. Düz web proxy'si (HTTP) ve "proxy ayarlarını şu bilgisayarlar ve alan adları için atla" listesi değiştirilmez.
+
+- "Bizim proxy" sayılan durum: herhangi bir serviste SOCKS **veya** HTTPS proxy açık ve `127.0.0.1:1080`'i gösteriyor. Kapatırken yalnızca bizi gösteren ayarlar kapatılır; başka bir sunucuya ayarlı kendi proxy'nize dokunulmaz.
+- v1.1.0'da açtığınız (yalnızca SOCKS) ayar da algılanır ve aynı şekilde otomatik kapatılır. HTTPS proxy'yi de eklemek için ByeDPI çalışırken **Aç**'a yeniden basın (veya kapatıp açın); başka ağ servislerinde kalmış yarım ayarlar da aynı parola penceresinde tamamlanır.
+- Birincil serviste başka bir sunucuyu gösteren kendi SOCKS veya HTTPS proxy'niz (ör. şirket proxy'si) açıksa **Aç** onun üzerine yazmaz ve nedenini söyler; sistem proxy'yi kullanmak için önce o proxy'yi Sistem Ayarları'ndan kapatın.
 
 - Yalnızca ByeDPI çalışırken açılabilir ve yalnızca ByeDPI çalışırken güvenlidir. Parola penceresi açıkken ByeDPI durursa proxy açılmaz.
 - ByeDPI'ı **Durdur**duğunuzda, **Tümünü Zorla Kapat** kullandığınızda veya uygulamadan **çıktığınızda** otomatik kapatılır (yönetici parolası istenir; pencere nedenini yazar).
@@ -103,9 +109,21 @@ Hızlı İşlemler, uygulamayı `--proxy-server=socks5://127.0.0.1:1080` paramet
 - Çıkışta proxy kapatılamazsa (parola iptal edildi veya hata) uygulama sorar: **Tekrar Dene**, **ByeDPI çalışsın, çık** (ByeDPI arka planda çalışmaya devam eder, internet çalışır) veya **Çıkma**. Oturum kapatma, yeniden başlatma ve bilgisayarı kapatmada soru sorulmaz; proxy açık kalmışsa SplitWire sonraki açılışta uyarır.
 - Elle kapatma adımları [Sorun giderme](#sorun-giderme) bölümünde.
 
+### Roblox (deneysel)
+
+Roblox, Discord'un aksine `--proxy-server` parametresini yok sayar. Ölçümlere göre Roblox'un web/giriş adresleri (ör. `www.roblox.com`, `clientsettings.roblox.com`, `gamejoin.roblox.com`) Discord ile aynı şekilde engelleniyor: DNS engelleme adresi döndürüyor ve doğru adresle bile doğrudan TLS bağlantısı DPI tarafından kesiliyor; ByeDPI üzerinden ise tüm yöntemlerle erişilebiliyor ([#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)).
+
+1. Önce DNS'i düzeltin: **Ağ Ayarları**'ndan 1.1.1.1 veya şifreli DNS (DoH) profili (uyarı Roblox için de görünür).
+2. ByeDPI'ı başlatın, ardından **Sistem Proxy > Aç**.
+3. Roblox'u bundan sonra başlatın (açıksa tamamen kapatıp yeniden açın).
+
+- Beklenen: Roblox'un yalnızca web/giriş trafiği ByeDPI'dan geçer, oyun trafiği (UDP) doğrudan gider; bu yüzden ping'in etkilenmemesi beklenir. Sistem proxy açıkken bu ayarı kullanan diğer uygulamalar (ör. Safari) da ByeDPI'dan geçer.
+- **Deneysel:** Bu yol Roblox macOS istemcisinin sistem proxy ayarlarını kullanmasına bağlıdır ve henüz doğrulanamadı. Çalışırsa veya çalışmazsa lütfen [#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13) üzerinden bildirin.
+- İşe yaramazsa **WireGuard/WARP** kullanın; tüm trafik tünelden geçtiği için ping daha yüksek olur.
+
 ### WireGuard / Cloudflare WARP modu
 
-ByeDPI ile çalışmayan uygulamalar (Roblox, oyunlar vb.) için alternatif.
+ByeDPI ile çalışmayan uygulamalar (oyunlar vb.) için alternatif. Tüm trafik WARP'tan geçtiği için çevrim içi oyunlarda ping artar ve bazı oyunlarda sunucu değiştirme sorunları yaşanabilir; Roblox için önce yukarıdaki yolu deneyin.
 
 1. Terminal'de: `brew install wireguard-tools` (wg-quick, wg, wireguard-go ve bash 4+ kurulur).
 2. **WireGuard** sekmesi > **Kur ve Bağlan**. Uygulama:
@@ -130,15 +148,16 @@ Bilmeniz gerekenler:
 
 ### Sorun giderme
 
-**Discord açılmıyor / "update failed" (DNS zehirlenmesi)**
-Bazı operatörlerin DNS sunucuları `discord.com` için gerçek adres yerine engelleme sayfası adresi (`195.175.254.2`) döndürür. ciadpi hedef adresleri sistem DNS'i ile çözdüğü için DPI aşılsa bile bağlantı engelleme sayfasına gider. Çözüm:
+**Discord / Roblox açılmıyor, Discord'da "update failed" (DNS zehirlenmesi)**
+Bazı operatörlerin DNS sunucuları `discord.com` ve `www.roblox.com` için gerçek adres yerine engelleme sayfası adresi (`195.175.254.2`) döndürür. ciadpi hedef adresleri (SOCKS ve HTTPS proxy) sistem DNS'i ile çözdüğü için DPI aşılsa bile bağlantı engelleme sayfasına gider. Çözüm:
 1. DNS'i Cloudflare (1.1.1.1) yapın (uyarıdaki düğme veya **Ağ Ayarları** sekmesi).
 2. Uyarı sürüyorsa operatörünüz 53. port DNS trafiğini yakalıyordur: DoH profilini yükleyin ya da WireGuard/WARP kullanın.
-3. Discord'u SplitWire'dan **yeniden başlatın**.
+3. Discord'u SplitWire'dan **yeniden başlatın** (Roblox'u da kapatıp yeniden açın).
 
 Test için (ByeDPI çalışırken):
 ```bash
 curl -I --socks5-hostname 127.0.0.1:1080 https://discord.com
+curl -I --proxy http://127.0.0.1:1080 https://www.roblox.com   # HTTPS proxy (HTTP CONNECT)
 ```
 
 **"Port 1080 kullanımda"**
@@ -149,10 +168,11 @@ curl -I --socks5-hostname 127.0.0.1:1080 https://discord.com
 
 **Proxy açık kaldı, internet çalışmıyor**
 1. Önce SplitWire'ı açın: Açılışta durumu algılar ve **Sistem Proxy'yi Kapat** seçeneği sunar.
-2. Elle: **Sistem Ayarları > Ağ >** (Wi-Fi veya Ethernet) **> Ayrıntılar… > Proxy'ler** > **SOCKS proxy**'yi kapatın > **Tamam**.
+2. Elle: **Sistem Ayarları > Ağ >** (Wi-Fi veya Ethernet) **> Ayrıntılar… > Proxy'ler** > **SOCKS proxy** ve **Güvenli web proxy'si (HTTPS)** seçeneklerini kapatın > **Tamam**.
 3. Terminal ile: `networksetup -listallnetworkservices` ile servis adını bulun, sonra:
    ```bash
    sudo networksetup -setsocksfirewallproxystate "Wi-Fi" off
+   sudo networksetup -setsecurewebproxystate "Wi-Fi" off
    ```
 
 **WireGuard kurulumu başarısız**
@@ -170,9 +190,9 @@ Gereksinimler: macOS ve tam **Xcode** 15+ (Swift 5.9+). Yalnızca Command Line T
 git clone https://github.com/a-mertdincer/SplitWire-Turkey-macOS.git
 cd SplitWire-Turkey-macOS
 
-./build.sh                     # evrensel sürüm: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.0.zip (+ .sha256)
+./build.sh                     # evrensel sürüm: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.1.zip (+ .sha256)
 ./build.sh --arch-native       # hızlı geliştirme derlemesi (yalnızca bu Mac'in mimarisi, zip yok)
-./build.sh 1.1.0 --skip-zip    # .app'i derle, imzala ve doğrula; zip oluşturma
+./build.sh 1.1.1 --skip-zip    # .app'i derle, imzala ve doğrula; zip oluşturma
 ./build.sh --clean             # önce .build ve build/ klasörlerini sil
 ```
 
@@ -211,10 +231,10 @@ MIT. Ayrıntılar için [LICENSE](LICENSE). Sorular ve hata bildirimleri: [Issue
 
 ### What it does
 
-- **ByeDPI (ciadpi):** Runs a local SOCKS5 proxy on `127.0.0.1:1080` that gets around your ISP's DPI (deep packet inspection) blocking. The proxy is reachable from this Mac only, not from other devices on your network.
+- **ByeDPI (ciadpi):** Runs a local proxy on `127.0.0.1:1080` that gets around your ISP's DPI (deep packet inspection) blocking. The same port accepts both SOCKS5 and HTTPS (HTTP CONNECT) connections. The proxy is reachable from this Mac only, not from other devices on your network.
 - **Quick actions:** Launches Discord and other Chromium/Electron apps through the proxy with one click. If the app is already running, it offers to quit and relaunch it.
-- **DNS blocking check:** At launch, checks whether `discord.com` resolves to its real address or to a block page, and warns you if it doesn't. Offers one-click Cloudflare DNS (1.1.1.1) and an encrypted DNS (DoH) profile.
-- **System proxy (optional):** A system-wide SOCKS proxy for apps that ignore the proxy flag (Safari, etc.). It is turned off automatically when ByeDPI stops or you quit the app.
+- **DNS blocking check:** At launch, checks whether Discord (`discord.com`, `gateway.discord.gg`) resolves to its real addresses or to a block page by comparing with encrypted DNS; for Roblox (`www.roblox.com`) it checks the known block addresses and the address Discord was found poisoned with. It tells you which services are affected. Offers one-click Cloudflare DNS (1.1.1.1) and an encrypted DNS (DoH) profile.
+- **System proxy (optional):** System-wide SOCKS and HTTPS proxy settings for apps that ignore the proxy flag (Safari, Roblox, etc.). They are turned off automatically when ByeDPI stops or you quit the app.
 - **WireGuard / Cloudflare WARP:** A tunnel that sends all traffic through Cloudflare WARP (requires Homebrew `wireguard-tools`).
 - **Menu bar:** Start/stop, DPI method selection, system proxy status. The Dock icon can be hidden; the interface is available in Turkish and English.
 
@@ -227,7 +247,7 @@ MIT. Ayrıntılar için [LICENSE](LICENSE). Sorular ve hata bildirimleri: [Issue
 
 ### Installation
 
-1. Download `SplitWire-Turkey-v1.1.0.zip` from [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) and unzip it.
+1. Download `SplitWire-Turkey-v1.1.1.zip` from [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) and unzip it.
 2. Drag `SplitWire-Turkey.app` into your **Applications** folder.
 3. First launch: the app is signed ad-hoc (no Apple Developer ID / notarization), so macOS says it can't verify the developer. Do one of the following:
    - macOS 13–14: right-click (Control-click) the app > **Open** > **Open**.
@@ -266,7 +286,7 @@ Your choice is saved, and the main window and menu bar always show the same meth
 | Split + Disorder | `-s 1+s -d 3+s --tlsrec 1+s` |
 | Custom | Your own arguments |
 
-- `-i 127.0.0.1 -p 1080` is added automatically (unless your Custom arguments set `-i`/`-p`).
+- `-i 127.0.0.1 -p 1080 -G` is added automatically (unless your Custom arguments set `-i`/`-p`/`-G`). `-G` (`--http-connect`) makes the same port accept HTTP CONNECT requests next to SOCKS5; the system HTTPS proxy uses it. ciadpi can't serve plain HTTP proxy requests (`GET http://…`), so the plain web proxy (HTTP) is never set.
 - **Fake presets were removed:** ciadpi built for macOS can't send fake packets (`FAKE_SUPPORT` is Linux/Windows only). If you had a Fake preset selected, it falls back to Standard.
 - Try Standard first. Most of the time the real problem is DNS; once DNS is fixed, Standard is usually enough.
 
@@ -278,12 +298,17 @@ Quick actions launch the app with `--proxy-server=socks5://127.0.0.1:1080` (edit
 |---|---|
 | Chromium/Electron based (Discord, Chrome, Brave, Edge, Slack, Spotify…) | Launch it from Quick actions. |
 | Safari and apps that use macOS network settings | Ignore the flag; turn on **System proxy**. |
-| Roblox, games and apps with their own network stack | Ignore the flag and usually the system SOCKS setting too; use **WireGuard/WARP**. |
+| Roblox | Ignores the flag. Try the experimental **ByeDPI + System proxy** route first ([Roblox](#roblox-experimental)); otherwise use **WireGuard/WARP**. |
+| Games and other apps with their own network stack | Ignore the flag and usually the system proxy settings too; use **WireGuard/WARP**. |
 | Firefox | Has its own setting: Settings > General > Network Settings > Manual proxy configuration: SOCKS host `127.0.0.1`, port `1080`, SOCKS v5, with "Proxy DNS when using SOCKS v5" checked. |
 
 ### System proxy
 
-**Quick actions > System proxy > Turn on** sets the SOCKS proxy of your primary network service (e.g. Wi-Fi) to `127.0.0.1:1080`.
+**Quick actions > System proxy > Turn on** sets both the **SOCKS proxy** and the **secure web proxy (HTTPS)** of your primary network service (e.g. Wi-Fi) to `127.0.0.1:1080`, with a single password prompt. The plain web proxy (HTTP) and the "bypass proxy settings for these hosts & domains" list are not changed.
+
+- "Our proxy" means: on any service, the SOCKS **or** HTTPS proxy is on and points to `127.0.0.1:1080`. Turning it off only switches off the settings that point to us; your own proxy pointing to another server is left alone.
+- A SOCKS-only setting turned on with v1.1.0 is detected too and is turned off automatically in the same way. To add the HTTPS proxy as well, press **Turn on** again while ByeDPI is running (or turn it off and on); partial settings left on other network services are completed in the same password prompt.
+- If your own SOCKS or HTTPS proxy pointing to another server (e.g. a company proxy) is on for the primary service, **Turn on** won't overwrite it and tells you why; to use the system proxy, turn that proxy off in System Settings first.
 
 - It can only be turned on while ByeDPI is running, and it is only safe while ByeDPI is running. If ByeDPI stops while the password prompt is open, the proxy is not turned on.
 - It is turned off automatically when you **Stop** ByeDPI, use **Force stop all**, or **quit** the app (your administrator password is required; the prompt says why).
@@ -292,9 +317,21 @@ Quick actions launch the app with `--proxy-server=socks5://127.0.0.1:1080` (edit
 - If the proxy can't be turned off when you quit (password cancelled or an error), the app asks: **Try again**, **Quit, keep ByeDPI running** (ByeDPI keeps running in the background, so your internet keeps working) or **Don't quit**. There is no prompt on log out, restart or shut down; if the proxy was left on, SplitWire warns you the next time it opens.
 - To turn it off manually, see [Troubleshooting](#troubleshooting).
 
+### Roblox (experimental)
+
+Unlike Discord, Roblox ignores the `--proxy-server` flag. Measurements show Roblox's web/login hosts (e.g. `www.roblox.com`, `clientsettings.roblox.com`, `gamejoin.roblox.com`) are blocked the same way as Discord: DNS returns the block address, and even with the correct address a direct TLS connection is cut by DPI; through ByeDPI they are reachable with every method ([#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)).
+
+1. Fix DNS first: 1.1.1.1 or the encrypted DNS (DoH) profile in the **Network** tab (the banner covers Roblox too).
+2. Start ByeDPI, then **System proxy > Turn on**.
+3. Start Roblox after that (if it is open, quit it completely and reopen it).
+
+- Expected: only Roblox's web/login traffic goes through ByeDPI and game traffic (UDP) goes direct, so ping should stay about the same. While the system proxy is on, other apps that use it (e.g. Safari) also go through ByeDPI.
+- **Experimental:** this depends on the Roblox macOS client using the system proxy settings, which hasn't been verified yet. Please report whether it works on [#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13).
+- If it doesn't work, use **WireGuard/WARP**; since all traffic goes through the tunnel, ping will be higher.
+
 ### WireGuard / Cloudflare WARP mode
 
-An alternative for apps that don't work with ByeDPI (Roblox, games, etc.).
+An alternative for apps that don't work with ByeDPI (games, etc.). Because all traffic goes through WARP, online games get higher ping and some games may have trouble switching servers; for Roblox, try the route above first.
 
 1. In Terminal: `brew install wireguard-tools` (installs wg-quick, wg, wireguard-go and bash 4+).
 2. **WireGuard** tab > **Install and connect**. The app:
@@ -319,15 +356,16 @@ Good to know:
 
 ### Troubleshooting
 
-**Discord doesn't load / "update failed" (DNS poisoning)**
-Some ISPs' DNS servers return a block-page address (`195.175.254.2`) instead of the real address for `discord.com`. ciadpi resolves target hosts with the system DNS, so even with DPI bypassed the connection goes to the block page. Fix:
+**Discord / Roblox doesn't load, Discord says "update failed" (DNS poisoning)**
+Some ISPs' DNS servers return a block-page address (`195.175.254.2`) instead of the real address for `discord.com` and `www.roblox.com`. ciadpi resolves target hosts (SOCKS and HTTPS proxy) with the system DNS, so even with DPI bypassed the connection goes to the block page. Fix:
 1. Set DNS to Cloudflare (1.1.1.1) (button in the banner, or the **Network** tab).
 2. If the warning persists, your ISP intercepts DNS on port 53: install the DoH profile or use WireGuard/WARP.
-3. **Relaunch** Discord from SplitWire.
+3. **Relaunch** Discord from SplitWire (and quit and reopen Roblox).
 
 To test (while ByeDPI is running):
 ```bash
 curl -I --socks5-hostname 127.0.0.1:1080 https://discord.com
+curl -I --proxy http://127.0.0.1:1080 https://www.roblox.com   # HTTPS proxy (HTTP CONNECT)
 ```
 
 **"Port 1080 is in use"**
@@ -338,10 +376,11 @@ curl -I --socks5-hostname 127.0.0.1:1080 https://discord.com
 
 **The proxy stayed on and the internet doesn't work**
 1. Open SplitWire first: at launch it detects this and offers **Turn off system proxy**.
-2. Manually: **System Settings > Network >** (Wi-Fi or Ethernet) **> Details… > Proxies** > turn off **SOCKS proxy** > **OK**.
+2. Manually: **System Settings > Network >** (Wi-Fi or Ethernet) **> Details… > Proxies** > turn off **SOCKS proxy** and **Secure web proxy (HTTPS)** > **OK**.
 3. In Terminal: find the service name with `networksetup -listallnetworkservices`, then:
    ```bash
    sudo networksetup -setsocksfirewallproxystate "Wi-Fi" off
+   sudo networksetup -setsecurewebproxystate "Wi-Fi" off
    ```
 
 **WireGuard setup fails**
@@ -357,9 +396,9 @@ Requirements: macOS and full **Xcode** 15+ (Swift 5.9+). The Command Line Tools 
 git clone https://github.com/a-mertdincer/SplitWire-Turkey-macOS.git
 cd SplitWire-Turkey-macOS
 
-./build.sh                     # universal release: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.0.zip (+ .sha256)
+./build.sh                     # universal release: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.1.zip (+ .sha256)
 ./build.sh --arch-native       # fast dev build (this Mac's architecture only, no zip)
-./build.sh 1.1.0 --skip-zip    # build, sign and verify the .app without the zip
+./build.sh 1.1.1 --skip-zip    # build, sign and verify the .app without the zip
 ./build.sh --clean             # delete .build and build/ first
 ```
 

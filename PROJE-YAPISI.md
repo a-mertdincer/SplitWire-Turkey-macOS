@@ -1,6 +1,6 @@
 # SplitWire-Turkey macOS - Proje Yapısı
 
-Sürüm: 1.1.0 · SwiftPM (tools 5.9, Swift 5 dil modu) · SwiftUI + AppKit · macOS 13+ · evrensel (arm64 + x86_64)
+Sürüm: 1.1.1 · SwiftPM (tools 5.9, Swift 5 dil modu) · SwiftUI + AppKit · macOS 13+ · evrensel (arm64 + x86_64)
 
 ## Dizin yapısı
 
@@ -17,7 +17,8 @@ SplitWire-Turkey-macOS/
 ├── README.md                      # Türkçe + İngilizce genel bakış
 ├── KULLANIM.md                    # Türkçe kullanım kılavuzu
 ├── PROJE-YAPISI.md                # Bu dosya
-├── RELEASE_NOTES_v1.1.0.md        # Sürüm notları
+├── RELEASE_NOTES_v1.1.1.md        # Sürüm notları (v1.1.1, #13)
+├── RELEASE_NOTES_v1.1.0.md        # Sürüm notları (v1.1.0)
 ├── LICENSE                        # MIT
 │
 ├── Sources/SplitWireTurkey/
@@ -26,12 +27,12 @@ SplitWire-Turkey-macOS/
 │   │   └── AppState.swift         # Arayüz durumu: dil, koyu mod, Dock simgesi, favori uygulamalar
 │   ├── Services/
 │   │   ├── ByeDPIService.swift          # ciadpi süreç yönetimi (tek örnek), preset, durum izleme, çıkış hazırlığı
-│   │   ├── SystemProxyService.swift     # networksetup ile sistem SOCKS proxy aç/kapat/tara
+│   │   ├── SystemProxyService.swift     # networksetup ile sistem SOCKS + HTTPS proxy aç/kapat/tara
 │   │   ├── AppLauncher.swift            # Favori uygulamayı argümanlarla başlatma (NSWorkspace)
 │   │   ├── MenuBarService.swift         # NSStatusItem menüsü; ByeDPIService'i izler
 │   │   ├── MainWindowController.swift   # Ana pencereyi geri getirme + DockIconController
 │   │   ├── NetworkConfigService.swift   # DNS okuma/ayarlama (servis adı ile), önbellek temizleme
-│   │   ├── DNSHealthChecker.swift       # Sistem DNS vs DoH karşılaştırması (DNS zehirlenmesi)
+│   │   ├── DNSHealthChecker.swift       # Discord/Roblox DNS zehirlenmesi kontrolü (sistem DNS vs DoH, engelleme adresi)
 │   │   ├── DoHProfile.swift             # Cloudflare DoH .mobileconfig üretimi
 │   │   ├── WireGuardService.swift       # wgcf indirme/doğrulama, WARP profili, uç nokta sabitleme, wg-quick, isteğe bağlı LaunchDaemon
 │   │   └── Shell.swift                  # Süreç çalıştırma, kaçış yardımcıları, yönetici komutları
@@ -42,18 +43,18 @@ SplitWire-Turkey-macOS/
 │   │   └── LineRingBuffer.swift         # ciadpi stderr'inin son satırları
 │   └── Views/
 │       ├── ContentView.swift            # Başlık (dil, Dock, koyu mod) + sekmeler
-│       ├── ByeDPIView.swift             # ByeDPI sekmesi, Hızlı İşlemler, Sistem Proxy sayfası
+│       ├── ByeDPIView.swift             # ByeDPI sekmesi, Hızlı İşlemler, Sistem Proxy sayfası, Roblox notu
 │       ├── NetworkConfigView.swift      # Ağ Ayarları sekmesi
 │       ├── DNSHealthBanner.swift        # DNS uyarı kutusu + DoH profili sayfası
 │       ├── WireGuardView.swift          # WireGuard sekmesi
 │       └── AboutView.swift              # Hakkında sekmesi
 │
 └── Tests/SplitWireTurkeyTests/
-    ├── ByeDPIPresetsTests.swift             # Preset sırası/argümanları, Fake yok, taşıma, argüman oluşturma, editAsCustom
-    ├── ByeDPIServiceIntegrationTests.swift  # Gerçek ciadpi: başlat/yeniden başlat/durdur, yalnızca 127.0.0.1, boş Custom
-    ├── DNSTests.swift                       # DNS zehirlenmesi kararı, DoH JSON, scutil ayrıştırma, DoH profili
+    ├── ByeDPIPresetsTests.swift             # Preset sırası/argümanları, Fake yok, taşıma, argüman oluşturma (-G), editAsCustom
+    ├── ByeDPIServiceIntegrationTests.swift  # Gerçek ciadpi: başlat/yeniden başlat/durdur, yalnızca 127.0.0.1, SOCKS5 + HTTP CONNECT, boş Custom
+    ├── DNSTests.swift                       # DNS zehirlenmesi kararı (Discord/Roblox), uyarı metni, DoH JSON, scutil ayrıştırma, DoH profili
     ├── LocalizationTests.swift              # Dil seçimi, eski anahtar taşıma, bildirim, LocalizedText, AppleLanguages eşitleme
-    ├── NetworkSetupParserTests.swift        # networksetup/lsof ayrıştırma (dinleme adresleri), proxy komutları, Shell, LineRingBuffer
+    ├── NetworkSetupParserTests.swift        # networksetup/lsof ayrıştırma, SOCKS/HTTPS proxy durumu ve komutları, Shell, LineRingBuffer
     ├── WireGuardTests.swift                 # wgcf indirme adayları, Mach-O/SHA-256, uç nokta sabitleme, komut üretimi, plist
     └── TestLanguage.swift                   # Testlerde dili geçici ayarlama yardımcısı
 ```
@@ -120,7 +121,8 @@ Temel kurallar:
 
 ### Services/ByeDPIService.swift
 
-- ciadpi'yi `Process` ile doğrudan başlatır; argümanlar `ByeDPIArguments.build` ile oluşturulur (`-i 127.0.0.1 -p 1080` yoksa eklenir).
+- ciadpi'yi `Process` ile doğrudan başlatır; argümanlar `ByeDPIArguments.build` ile oluşturulur (`-i 127.0.0.1 -p 1080 -G` yoksa eklenir). `-G` (`--http-connect`) aynı porta HTTP CONNECT desteği ekler: ciadpi önce SOCKS sürüm baytına, sonra `CONNECT`'e bakar, yani SOCKS5 istemcileri etkilenmez. Sistem HTTPS proxy'si bunu kullanır (#13).
+- `enableSystemProxy()`: Harici (bu oturumda başlatılmamış) bir ciadpi'nin komut satırında `-G`/`--http-connect` yoksa (ör. v1.1.0'dan kalma) sistem proxy açılmaz; HTTPS proxy CONNECT'i desteklemeyen bir sürece yönlenmesin diye kullanıcıdan yeniden başlatması istenir.
 - Başlatmadan önce 1080'deki LISTEN soketlerini `lsof` ile kontrol eder: kalmış ciadpi ise kapatıp yeniden denemeyi önerir, başka program ise adını ve PID'sini gösterir.
 - Harici ciadpi tüm arayüzlerde dinliyorsa (v1.0.0, `-i` yok) `isExposedToNetwork` yayınlanır (pencere + menü çubuğunda uyarı); kendi kullanıcımızın süreci için PID başına bir kez "127.0.0.1'de güvenli yeniden başlat" önerilir. Böyle bir süreç `start()` için "çalışıyor" sayılmaz.
 - Başlattıktan 0,6 sn sonra süreç kapanmışsa stderr'in son satırlarıyla hata gösterir.
@@ -135,7 +137,7 @@ Temel kurallar:
 
 ### Services/SystemProxyService.swift
 
-"Bizim proxy" = herhangi bir ağ servisinde SOCKS proxy açık ve `127.0.0.1:1080`'i gösteriyor. `refresh()` tüm servisleri tarar; `enable()` birincil servisi `NetworkConfigService.resolvePrimaryService()` ile bulur (VPN/utun ise fiziksel servise düşer; yoksa `noActiveService`) ve açar. Yetkili komut aynı root kabukta önce `lsof … -c ciadpi` ile dinleyiciyi doğrular, yoksa `SPLITWIRE_NO_LISTENER` ile çıkar (`noListener`). `disableAll()` bizim proxy'nin açık olduğu tüm servisleri tek parola penceresinde kapatır. `isBusy` sürerken pencere ve menü çubuğunda Başlat/Durdur/preset devre dışıdır. `init(host:port:)` testler için enjekte edilebilir.
+"Bizim proxy" = herhangi bir ağ servisinde SOCKS **veya** güvenli web proxy'si (HTTPS) açık ve `127.0.0.1:1080`'i gösteriyor (`OurProxyState.detect`, saf ve testli; v1.1.0'ın yalnızca-SOCKS ayarı da algılanır). `refresh()` tüm servislerde `-getsocksfirewallproxy` ve `-getsecurewebproxy` okur (ikisinin çıktı biçimi aynıdır, `NetworkSetupParser.parseProxySettings`) ve `activeProxies`'i yayınlar; açılıştaki eski proxy kontrolü, durdurma/çökme/çıkışta otomatik kapatma, pencere ve menü çubuğu bunu kullanır. `enable()` birincil servisi `NetworkConfigService.resolvePrimaryService()` ile bulur (VPN/utun ise fiziksel servise düşer; yoksa `noActiveService`). Serviste başka bir sunucuyu gösteren açık SOCKS/HTTPS proxy varsa (`OurProxyState.foreignProxy`, saf ve testli) üzerine yazmaz, `foreignProxy` hatası verir. Aksi halde tek yetkili komutla (`enableCommand(services:)`) birincil serviste ve bizi gösteren yarım ayarı olan diğer servislerde SOCKS ve HTTPS proxy'yi ayarlayıp açar. Yetkili komut aynı root kabukta önce `lsof … -c ciadpi` ile dinleyiciyi doğrular, yoksa `SPLITWIRE_NO_LISTENER` ile çıkar (`noListener`). `disableAll()` bizim proxy'nin açık olduğu tüm servislerde yalnızca bizi gösteren türleri (SOCKS ve/veya HTTPS) tek parola penceresinde kapatır; başka sunucuya ayarlı kullanıcı proxy'sine dokunmaz. Düz web proxy'si (HTTP) asla ayarlanmaz (ciadpi `GET http://…` biçimli istekleri karşılayamaz) ve bypass listesi değiştirilmez. `hasIncompleteSetup`: bir serviste türlerden yalnızca biri açık ve aynı serviste kullanıcının kendi proxy'si (`hasForeignProxy`) açık değil (sayfada "Aç" yeniden etkinleşir; tek basışta tamamlanır). `isBusy` sürerken pencere ve menü çubuğunda Başlat/Durdur/preset devre dışıdır. `init(host:port:)` testler için enjekte edilebilir.
 
 ### Services/AppLauncher.swift
 
@@ -159,11 +161,17 @@ Uygulamayı `NSWorkspace.openApplication` ile argümanlarla açar (kabuk yok). A
 
 ### Services/DNSHealthChecker.swift
 
-`discord.com` ve `gateway.discord.gg` adlarını sistem çözümleyicisi (`getaddrinfo`, ciadpi'nin kullandığıyla aynı) ve DoH (1.1.1.1, 8.8.8.8, ... JSON API; proxy'siz, önbelleksiz oturum) ile çözer. `DNSHealthEvaluator`:
+`DNSHealthChecker.targets` (`DNSCheckTarget`: ad, servis, kural) adlarını sistem çözümleyicisi (`getaddrinfo`, ciadpi'nin kullandığıyla aynı; yalnızca IPv4) ile çözer:
+
+- `discord.com`, `gateway.discord.gg` (Discord, `compareWithDoH`): ayrıca DoH (1.1.1.1, 8.8.8.8, ... JSON API; proxy'siz, önbelleksiz oturum) ile çözülür.
+- `www.roblox.com` (Roblox, `knownBlockIPOnly`, #13): yalnızca engelleme adreslerine bakılır: `knownBlockIPs`, `isNonRoutable` (0.0.0.0/8, 127.0.0.0/8) ve aynı kontrolde Discord hedeflerinin zehirli bulunduğu sistem adresleri (`evaluateAll` iki geçişte değerlendirir). Roblox CDN adresleri çözümleyiciye göre değiştiği için başka bir adres zehirli sayılmaz, DoH sorgusu yapılmaz.
+
+`DNSHealthEvaluator`:
 
 - Bilinen engelleme adresi (`195.175.254.2` ve IPv6 karşılığı) → zehirli (DoH'a ulaşılamasa bile).
-- DoH sonucu yoksa → bilinmiyor (yanlış alarm yok).
-- Sistem adreslerinin hiçbiri DoH adresleriyle aynı /16 ağında değilse → zehirli.
+- DoH sonucu yoksa veya sistem adres döndürmediyse → bilinmiyor (yanlış alarm yok).
+- `compareWithDoH`: Sistem adreslerinin hiçbiri DoH adresleriyle aynı /16 ağında değilse → zehirli.
+- `combine`: biri zehirliyse zehirli (adresler birleştirilir), hepsi doğruysa doğru, aksi halde bilinmiyor. `affectedServices` / `affectedHosts` uyarı metnine ("Discord ve Roblox için…", `LList`) girer.
 
 ### Services/DoHProfile.swift
 
@@ -186,9 +194,9 @@ Uygulamayı `NSWorkspace.openApplication` ile argümanlarla açar (kabuk yok). A
 
 ### Support/
 
-- `ByeDPIPresets.swift`: Sıralı preset tablosu (Fake yok), `migrate` (eski `menuBarPreset` → `byedpiPreset`, bilinmeyen/kaldırılmış → Standart), `ByeDPIArguments` (tırnak destekli `tokenize`, `build`, `displayString`).
+- `ByeDPIPresets.swift`: Sıralı preset tablosu (Fake yok), `migrate` (eski `menuBarPreset` → `byedpiPreset`, bilinmeyen/kaldırılmış → Standart), `ByeDPIArguments` (tırnak destekli `tokenize`, `build` (`-i`/`-p`/`-G` ekler), `containsHTTPConnect`, `commandLineSupportsHTTPConnect`, `displayString`).
 - `Localization.swift`: `AppLanguage` (tr/en), `L10n.current` (iş parçacığı güvenli, `appLanguage` anahtarı, eski `language` anahtarını taşır), `L(_:_:)`; servis durum mesajları için iki dili saklayan ve okunurken çözülen `LocalizedText` / `LT(_:_:)`.
-- `NetworkSetupParser.swift`: `route -n get default`, `networksetup -listnetworkserviceorder / -listallnetworkservices / -getsocksfirewallproxy`, `lsof -F pcun` ayrıştırıcıları (`PortListener`: PID başına dinleme adresleri, `isLoopbackOnly`).
+- `NetworkSetupParser.swift`: `route -n get default`, `networksetup -listnetworkserviceorder / -listallnetworkservices / -getsocksfirewallproxy / -getsecurewebproxy` (`ProxySettings`), `lsof -F pcun` ayrıştırıcıları (`PortListener`: PID başına dinleme adresleri, `isLoopbackOnly`).
 - `LineRingBuffer.swift`: Son N satırı tutan kilitli halka tampon.
 
 ---
@@ -233,7 +241,7 @@ Alan adı: `com.cagritaskin.splitwire-turkey` (v1.0.0 sürümüyle aynı; ayarla
 ```
 Başlat (pencere / menü çubuğu / favori uygulama)
   → ByeDPIService.start()
-  → argümanlar: preset (veya Custom) + -i 127.0.0.1 -p 1080
+  → argümanlar: -i 127.0.0.1 -p 1080 -G + preset (veya Custom)
   → lsof: 1080 boş mu? (kalmış ciadpi → kapat ve tekrar dene önerisi)
   → Process.run(ciadpi) → 0,6 sn sonra hâlâ çalışıyor mu?
   → isRunning / runningPreset / runningArgs yayınlanır → pencere + menü çubuğu güncellenir
@@ -243,7 +251,7 @@ Başlat (pencere / menü çubuğu / favori uygulama)
 
 ```
 Durdur → SIGTERM, ardından SIGKILL → 1080'de kalan kendi ciadpi'lerimizi öldür
-       → bizim sistem proxy açıksa: networksetup ... off (tek parola penceresi; iptal → uyarı)
+       → bizim sistem proxy açıksa (SOCKS ve/veya HTTPS): networksetup ...state off (tek parola penceresi; iptal → uyarı)
 Çıkış  → applicationShouldTerminate (.terminateLater) → prepareForQuit
        → proxy kapandı: ciadpi öldür → çık
        → proxy kapanmadı: Tekrar Dene / ByeDPI çalışsın, çık / Çıkma (oturum sonunda sormadan çık)
@@ -294,7 +302,7 @@ scripts/verify-app.sh SplitWire-Turkey.app [--archs "arm64 x86_64"]
 5. `scripts/verify-app.sh`: `codesign --verify --deep --strict`, kaynakların mühürlü olması, mimariler, `minos` ≤ 13.0, `CFBundleLocalizations`'ta `tr`, ciadpi'nin çalışması.
 6. `ditto -c -k --norsrc --keepParent` ile zip + `.sha256`; zip açılıp tekrar doğrulanır.
 
-Testler sistem ayarlarına dokunmaz. Entegrasyon testleri gerçek ciadpi'yi `127.0.0.1:41873` üzerinde çalıştırır (sistem proxy servisi de bu porta bakar, gerçek 1080 ayarına dokunulmaz), her presetin yalnızca loopback'te dinlediğini kontrol eder ve ciadpi yoksa atlanır. Yukarıdaki Command Line Tools kısıtı `swift build` / `swift run` / `swift test` için de geçerlidir.
+Testler sistem ayarlarına dokunmaz. Entegrasyon testleri gerçek ciadpi'yi `127.0.0.1:41873` üzerinde çalıştırır (sistem proxy servisi de bu porta bakar, gerçek 1080 ayarına dokunulmaz), her presetin yalnızca loopback'te dinlediğini ve aynı portun hem SOCKS5 hem HTTP CONNECT el sıkışmasını kabul ettiğini kontrol eder; ciadpi yoksa atlanır. Yukarıdaki Command Line Tools kısıtı `swift build` / `swift run` / `swift test` için de geçerlidir.
 
 Xcode ile çalışmak için: `open Package.swift`.
 
@@ -304,5 +312,6 @@ Xcode ile çalışmak için: `open Package.swift`.
 
 - [README.md](README.md): Genel bilgi, kurulum, sorun giderme (TR/EN)
 - [KULLANIM.md](KULLANIM.md): Ayrıntılı kullanım kılavuzu
+- [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md): v1.1.1 değişiklikleri (#13: Roblox, SOCKS + HTTPS sistem proxy)
 - [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md): v1.1.0 değişiklikleri
 - [LICENSE](LICENSE): MIT

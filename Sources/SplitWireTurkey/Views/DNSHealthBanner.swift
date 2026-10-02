@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// ISS DNS'i Discord için engelleme adresi döndürüyorsa gösterilen uyarı (#11/#9).
+/// ISS DNS'i Discord ve/veya Roblox için engelleme adresi döndürüyorsa gösterilen uyarı (#11/#9/#13).
 /// ByeDPI ve Ağ sekmelerinin en üstünde yer alır.
 struct DNSHealthBanner: View {
     /// true ise DNS doğruyken küçük yeşil bir satır gösterilir (yalnızca Ağ sekmesi).
@@ -51,7 +51,9 @@ struct DNSHealthBanner: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L("DNS engellemesi algılandı", "DNS blocking detected"))
                         .font(.headline)
-                    Text(blockedMessage(systemIPs: systemIPs))
+                    Text(Self.blockedMessage(services: checker.affectedServices,
+                                             hosts: checker.affectedHosts,
+                                             systemIPs: systemIPs).resolved)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                     if network.activePreset == .cloudflare {
@@ -121,8 +123,7 @@ struct DNSHealthBanner: View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
-            Text(L("DNS doğru çözümlüyor (discord.com gerçek adresine gidiyor)",
-                   "DNS resolves correctly (discord.com points to its real address)"))
+            Text(Self.okMessage(services: DNSHealthChecker.services).resolved)
                 .font(.caption)
                 .foregroundColor(.secondary)
             Spacer()
@@ -143,11 +144,39 @@ struct DNSHealthBanner: View {
         }
     }
 
-    private func blockedMessage(systemIPs: [String]) -> String {
-        let host = checker.affectedHost
+    /// Uyarı metni: hangi servislerin etkilendiğini söyler ("Discord ve Roblox için…").
+    /// Servis bilgisi yoksa (eski sonuç) Discord varsayılır.
+    nonisolated static func blockedMessage(services: [String], hosts: [String], systemIPs: [String]) -> LocalizedText {
+        let names = LList(services.isEmpty ? ["Discord"] : services)
         let ips = systemIPs.joined(separator: ", ")
-        return L("DNS sunucunuz \(host) için gerçek adres yerine engelleme adresi (\(ips)) döndürüyor. ByeDPI bu durumda Discord'a bağlanamaz.",
-                 "Your DNS server returns a block-page address (\(ips)) instead of the real address for \(host). ByeDPI can't connect to Discord while this happens.")
+        let hostList = hosts.isEmpty ? "" : " (\(hosts.joined(separator: ", ")))"
+        return LT("\(names.tr) için DNS sunucunuz gerçek adres yerine engelleme adresi (\(ips)) döndürüyor\(hostList). Bu düzeltilmeden ByeDPI \(names.tr) sunucularına bağlanamaz.",
+                  "For \(names.en), your DNS server returns a block-page address (\(ips)) instead of the real address\(hostList). Until this is fixed, ByeDPI can't connect to \(names.en).")
+    }
+
+    /// DoH ile doğrulanan servisler (Discord) "doğrulandı", yalnızca engelleme adreslerine bakılan
+    /// servisler (Roblox) "engelleme adresine gitmiyor" olarak yazılır: ikincisi için gerçek adres
+    /// doğrulanmaz, yalnızca engelleme sayfası algılanır.
+    nonisolated static func okMessage(services: [String]) -> LocalizedText {
+        let blockOnlyServices = Set(DNSHealthChecker.targets.filter { $0.rule == .knownBlockIPOnly }.map(\.service))
+            .subtracting(DNSHealthChecker.targets.filter { $0.rule == .compareWithDoH }.map(\.service))
+        let verified = services.filter { !blockOnlyServices.contains($0) }
+        let blockOnly = services.filter { blockOnlyServices.contains($0) }
+        var tr: [String] = []
+        var en: [String] = []
+        if !verified.isEmpty {
+            let names = LList(verified)
+            tr.append("\(names.tr) doğrulandı")
+            en.append("\(names.en) verified")
+        }
+        if !blockOnly.isEmpty {
+            let names = LList(blockOnly)
+            tr.append("\(names.tr) engelleme adresine gitmiyor")
+            en.append(blockOnly.count == 1 ? "\(names.en) doesn't point to a block page"
+                                           : "\(names.en) don't point to a block page")
+        }
+        return LT("DNS doğru çözümlüyor (\(tr.joined(separator: "; ")))",
+                  "DNS resolves correctly (\(en.joined(separator: "; ")))")
     }
 
     private var checkButton: some View {
@@ -172,8 +201,8 @@ struct DoHProfileSheet: View {
 
             Text(L("Ne zaman kullanılır?", "When should I use it?"))
                 .font(.headline)
-            Text(L("DNS'i 1.1.1.1 yaptıktan sonra uyarı hâlâ görünüyorsa internet sağlayıcınız DNS sorgularını (53. port) yakalayıp engelleme adresi döndürüyordur. DNS over HTTPS, sorguları Cloudflare'e şifreli (HTTPS) gönderdiği için bu müdahaleyi aşar. Profil tüm sistem için geçerlidir ve ByeDPI'ın Discord adresini doğru çözmesini sağlar.",
-                   "If the warning still shows after setting DNS to 1.1.1.1, your ISP is intercepting DNS queries (port 53) and returning a block-page address. DNS over HTTPS sends queries to Cloudflare encrypted (HTTPS), which gets around this interference. The profile applies system-wide and lets ByeDPI resolve Discord's address correctly."))
+            Text(L("DNS'i 1.1.1.1 yaptıktan sonra uyarı hâlâ görünüyorsa internet sağlayıcınız DNS sorgularını (53. port) yakalayıp engelleme adresi döndürüyordur. DNS over HTTPS, sorguları Cloudflare'e şifreli (HTTPS) gönderdiği için bu müdahaleyi aşar. Profil tüm sistem için geçerlidir ve ByeDPI'ın Discord ve Roblox adreslerini doğru çözmesini sağlar.",
+                   "If the warning still shows after setting DNS to 1.1.1.1, your ISP is intercepting DNS queries (port 53) and returning a block-page address. DNS over HTTPS sends queries to Cloudflare encrypted (HTTPS), which gets around this interference. The profile applies system-wide and lets ByeDPI resolve Discord and Roblox addresses correctly."))
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
 

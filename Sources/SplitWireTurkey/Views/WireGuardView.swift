@@ -246,6 +246,8 @@ struct WireGuardView: View {
                             "If 'Connect automatically at startup' is selected, the tunnel starts every time the computer starts and 'Disconnect' only turns it off for the current session; to turn it off permanently, use 'Uninstall WireGuard'. Otherwise, press 'Connect' after startup."))
                 infoLine(L("WARP bağlıyken ByeDPI'a gerek yoktur; ikisini aynı anda kullanmanız gerekmez.",
                             "ByeDPI is not needed while WARP is connected; you don't need to use both at the same time."))
+                infoLine(L("Tüm trafik WARP'tan geçtiği için çevrim içi oyunlarda gecikme (ping) artar ve bazı oyunlarda sunucu değiştirme sorunları yaşanabilir. Roblox için önce ByeDPI + Sistem Proxy yolunu deneyin (ByeDPI sekmesi).",
+                            "Because all traffic goes through WARP, online games get higher latency (ping) and some games may have trouble switching servers. For Roblox, try the ByeDPI + System proxy route first (ByeDPI tab)."))
                 infoLine(L("Gereksinim: Homebrew ile kurulan wireguard-tools (\(WireGuardSupport.installCommandHint)). wgcf otomatik indirilir.",
                             "Requirement: wireguard-tools installed with Homebrew (\(WireGuardSupport.installCommandHint)). wgcf is downloaded automatically."))
             }
