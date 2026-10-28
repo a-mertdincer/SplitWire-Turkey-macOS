@@ -115,10 +115,13 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(LocalizedText.verbatim("x").tr, "x")
         XCTAssertEqual(LocalizedText.verbatim("x").en, "x")
 
-        let preset = ByeDPIPresets.preset(id: ByeDPIPresets.defaultID)!
+        let preset = ByeDPIPresets.preset(id: ByeDPIPresets.standardID)!
         XCTAssertEqual(preset.localizedName, LT("Standart", "Standard"))
         withAppLanguage(.english) { XCTAssertEqual(preset.name, "Standard") }
         XCTAssertEqual(ByeDPIPresets.preset(id: "OOB")!.localizedName, .verbatim("OOB"))
+        let recommended = ByeDPIPresets.preset(id: ByeDPIPresets.defaultID)!
+        withAppLanguage(.turkish) { XCTAssertEqual(recommended.name, "Split 2 (önerilen)") }
+        withAppLanguage(.english) { XCTAssertEqual(recommended.name, "Split 2 (recommended)") }
     }
 
     /// AppKit/SwiftUI sistem menüleri (Gizle/Çık/Düzen/Pencere) uygulama içi dil seçimini izlesin (#8):

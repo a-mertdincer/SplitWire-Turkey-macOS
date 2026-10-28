@@ -133,6 +133,10 @@ struct ByeDPIView: View {
                                 .foregroundColor(.orange)
                         }
                     }
+
+                    Divider()
+
+                    ConnectionTestView(byedpiService: byedpiService)
                 }
 
                 if systemProxy.isOurProxyActive {
@@ -311,8 +315,8 @@ struct ByeDPIView: View {
                             .cornerRadius(4)
 
                         HStack {
-                            Text(L("Örnek: -s 1 --tlsrec 1+s   (-i 127.0.0.1, -p 1080 ve -G otomatik eklenir)",
-                                   "Example: -s 1 --tlsrec 1+s   (-i 127.0.0.1, -p 1080 and -G are added automatically)"))
+                            Text(L("Örnek: -s 2 --tlsrec 1+s   (-i 127.0.0.1, -p 1080 ve -G otomatik eklenir)",
+                                   "Example: -s 2 --tlsrec 1+s   (-i 127.0.0.1, -p 1080 and -G are added automatically)"))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -386,48 +390,66 @@ struct ByeDPIView: View {
 
                 // Markdown (**kalın**) içerdiği için LocalizedStringKey ile gösterilir.
                 Text(LocalizedStringKey(L(
-                    "**Not:** ByeDPI yerel bir proxy (\(byedpiService.proxyAddress), SOCKS5 ve HTTPS) oluşturur. Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda (Discord, Chrome, Brave, Edge, Slack, Spotify…) çalışır. Safari, Roblox ve oyunlar gibi diğer uygulamalar için 'Sistem Proxy' veya WireGuard kullanın.",
-                    "**Note:** ByeDPI creates a local proxy (\(byedpiService.proxyAddress), SOCKS5 and HTTPS). The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). For other apps such as Safari, Roblox and games, use 'System proxy' or WireGuard."
+                    "**Not:** ByeDPI yerel bir proxy (\(byedpiService.proxyAddress), SOCKS5 ve HTTPS) oluşturur. Hızlı İşlemler'den açılan uygulamalara hem proxy parametresi (Chromium/Electron: Discord, Chrome, Brave, Edge, Slack, Spotify…) hem de HTTPS_PROXY ortam değişkeni (Discord'un güncelleme denetimi, Roblox ve bu değişkeni okuyan diğer uygulamalar) verilir. Safari gibi macOS proxy ayarlarını kullanan uygulamalar için 'Sistem Proxy'yi, hiçbirini kullanmayan uygulamalar için WireGuard'ı kullanın.",
+                    "**Note:** ByeDPI creates a local proxy (\(byedpiService.proxyAddress), SOCKS5 and HTTPS). Apps opened from Quick actions get both the proxy parameter (Chromium/Electron: Discord, Chrome, Brave, Edge, Slack, Spotify…) and the HTTPS_PROXY environment variable (Discord's update check, Roblox and other apps that read it). For apps that use the macOS proxy settings, such as Safari, use 'System proxy'; for apps that use neither, use WireGuard."
                 )))
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 Divider()
 
-                RobloxGuideNote()
+                RobloxGuideNote(onAddRoblox: robloxToAdd.map { url in { addRobloxFavorite(url) } })
             }
             .padding()
         }
     }
 
+    /// Kurulu ama Hızlı İşlemler'de olmayan Roblox uygulaması (#13).
+    private var robloxToAdd: URL? {
+        guard let url = RobloxGuideNote.installedRobloxURL(),
+              !appState.isFavorite(url.path) else { return nil }
+        return url
+    }
+
+    private func addRobloxFavorite(_ url: URL) {
+        // Roblox proxy parametresini tanımaz; HTTPS_PROXY ile açılması yeterli
+        appState.addFavoriteApp(AppState.FavoriteApp(
+            name: url.deletingPathExtension().lastPathComponent,
+            path: url.path,
+            bundleIdentifier: Bundle(url: url)?.bundleIdentifier,
+            customArgs: ""
+        ))
+    }
+
     private var advancedSection: some View {
         GroupBox(label: Label(L("Gelişmiş", "Advanced"), systemImage: "gearshape.2.fill")) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(L("Discord Ayarları", "Discord settings"))
+                Text(L("Discord \"Checking for updates…\" ekranında kalıyorsa", "If Discord stays on \"Checking for updates…\""))
                     .font(.headline)
 
-                Text(L("Discord'un otomatik güncellemelerini devre dışı bırakmak için settings.json dosyasına şu satırları ekleyin:",
-                       "To turn off Discord's automatic updates, add these lines to settings.json:"))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(verbatim: "\"SKIP_HOST_UPDATE\": true,")
-                        .font(.system(.caption, design: .monospaced))
-                    Text(verbatim: "\"SKIP_MODULE_UPDATE\": true")
-                        .font(.system(.caption, design: .monospaced))
+                    Text(L("• Discord açılışta güncelleme denetimi yapar ve bu denetim başarılı olmadan açılmaz. Denetim proxy parametresini yok sayar (0.0.419 öncesi sürümler sistem proxy'sini de); SplitWire bu yüzden Discord'u HTTPS_PROXY ortam değişkeniyle başlatır. Discord'u Hızlı İşlemler'den açın. (Discord 0.0.419 ve sonrasını Dock'tan açmak isterseniz ByeDPI çalışırken Sistem Proxy'yi açmak da işe yarar.)",
+                           "• Discord checks for updates at startup and doesn't open until that check succeeds. The check ignores the proxy parameter (versions before 0.0.419 ignore the system proxy too), so SplitWire launches Discord with the HTTPS_PROXY environment variable. Open Discord from Quick actions. (To open Discord 0.0.419 or later from the Dock, turning on System proxy while ByeDPI runs also works.)"))
+                    Text(L("• Denetim TLS 1.2 kullanır ve her yöntemle geçmez. Yukarıdaki bağlantı testinde \"Discord güncelleme denetimi\" başarısızsa önerilen yöntemi seçin.",
+                           "• The check uses TLS 1.2 and doesn't get through with every method. If \"Discord update check\" fails in the connection test above, choose the recommended method."))
+                    Text(L("• Discord güncellemeyi kurduktan sonra kendini proxy'siz yeniden açar; SplitWire bunu algılar ve Discord'u ByeDPI ile otomatik olarak yeniden açar.",
+                           "• After installing an update, Discord reopens itself without the proxy; SplitWire detects this and reopens Discord with ByeDPI automatically."))
+                    Text(L("• Eski rehberlerdeki SKIP_HOST_UPDATE / SKIP_MODULE_UPDATE ayarları güncel macOS Discord'da etkisizdir; gerek yoktur.",
+                           "• The SKIP_HOST_UPDATE / SKIP_MODULE_UPDATE settings from older guides have no effect on current macOS Discord; you don't need them."))
                 }
-                .padding(8)
-                .background(Color.secondary.opacity(0.1))
-                .cornerRadius(6)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Button(action: openDiscordSettingsFolder) {
+                Button(action: openDiscordLogsFolder) {
                     HStack {
                         Image(systemName: "folder")
-                        Text(L("settings.json Klasörünü Aç", "Open settings.json folder"))
+                        Text(L("Discord Günlüklerini Aç", "Open Discord logs"))
                     }
                 }
                 .buttonStyle(.bordered)
+                .help(L("Sorun bildirirken eklemek için Discord'un günlük klasörünü Finder'da açar",
+                        "Opens Discord's log folder in Finder, to attach when reporting a problem"))
             }
             .padding()
         }
@@ -455,12 +477,13 @@ struct ByeDPIView: View {
         }
     }
 
-    private func openDiscordSettingsFolder() {
+    private func openDiscordLogsFolder() {
         let folder = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/discord", isDirectory: true)
-        let settings = folder.appendingPathComponent("settings.json")
-        if FileManager.default.fileExists(atPath: settings.path) {
-            NSWorkspace.shared.activateFileViewerSelecting([settings])
+        let logs = folder.appendingPathComponent("logs", isDirectory: true)
+        // macOS başka uygulamanın verisine erişimi engelleyebilir; Finder'a açtırmak yeterli
+        if FileManager.default.fileExists(atPath: logs.path) {
+            NSWorkspace.shared.open(logs)
         } else if FileManager.default.fileExists(atPath: folder.path) {
             NSWorkspace.shared.open(folder)
         } else {
@@ -661,8 +684,8 @@ struct AppEditorView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Text(L("Not: Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda çalışır (Discord, Chrome, Brave, Edge, Slack, Spotify…). Safari, Roblox ve oyunlar gibi diğer uygulamalar bu parametreyi yok sayar; bunlar için 'Sistem Proxy' (SOCKS + HTTPS) veya WireGuard kullanın.",
-                       "Note: The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). Other apps such as Safari, Roblox and games ignore it; use 'System proxy' (SOCKS + HTTPS) or WireGuard for them."))
+                Text(L("Not: Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda çalışır (Discord, Chrome, Brave, Edge, Slack, Spotify…). SplitWire ayrıca HTTPS_PROXY ortam değişkenini verir; Discord'un güncelleme denetimi ve Roblox bunu kullanır. Safari gibi macOS proxy ayarlarını kullanan uygulamalar için 'Sistem Proxy'yi, hiçbirini kullanmayanlar için WireGuard'ı kullanın.",
+                       "Note: The proxy parameter only works in Chromium/Electron-based apps (Discord, Chrome, Brave, Edge, Slack, Spotify…). SplitWire also sets the HTTPS_PROXY environment variable, which Discord's update check and Roblox use. For apps that use the macOS proxy settings, such as Safari, use 'System proxy'; for apps that use neither, use WireGuard."))
                     .font(.caption)
                     .foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
@@ -733,8 +756,8 @@ struct SystemProxyConfigView: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 12) {
-                Text(L("Bu seçenek etkin ağ servisinde hem SOCKS proxy hem de güvenli web proxy'si (HTTPS) olarak \(byedpiService.proxyAddress) adresini ayarlar; proxy parametresini desteklemeyen uygulamalar (Safari, Roblox vb.) da ByeDPI üzerinden bağlanabilir. Düz web proxy'si (HTTP) ve proxy istisna listeniz değiştirilmez.",
-                       "This option sets \(byedpiService.proxyAddress) as both the SOCKS proxy and the secure web proxy (HTTPS) on the active network service, so apps that don't support the proxy parameter (Safari, Roblox, etc.) can also connect through ByeDPI. The plain web proxy (HTTP) and your proxy bypass list are not changed."))
+                Text(L("Bu seçenek etkin ağ servisinde hem SOCKS proxy hem de güvenli web proxy'si (HTTPS) olarak \(byedpiService.proxyAddress) adresini ayarlar; proxy parametresini desteklemeyen ama macOS proxy ayarlarını kullanan uygulamalar (ör. Safari) da ByeDPI üzerinden bağlanabilir. Düz web proxy'si (HTTP) ve proxy istisna listeniz değiştirilmez. Roblox'un kendisi bu ayarı kullanmaz (onu Hızlı İşlemler'den başlatın), ama şifreyle girişteki güvenlik doğrulaması kullanır.",
+                       "This option sets \(byedpiService.proxyAddress) as both the SOCKS proxy and the secure web proxy (HTTPS) on the active network service, so apps that don't support the proxy parameter but use the macOS proxy settings (such as Safari) can also connect through ByeDPI. The plain web proxy (HTTP) and your proxy bypass list are not changed. Roblox itself doesn't use this setting (start it from Quick actions), but the security check when signing in with a password does."))
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -852,26 +875,110 @@ struct SystemProxyConfigView: View {
     }
 }
 
-/// Roblox ve oyunlar için kısa rehber (#13). ByeDPI sekmesinde ve Sistem Proxy sayfasında gösterilir.
+/// Roblox için kısa rehber (#13). ByeDPI sekmesinde ve Sistem Proxy sayfasında gösterilir.
+/// Roblox (libcurl) macOS proxy ayarlarını kullanmaz ama HTTPS_PROXY ortam değişkenini okur;
+/// bu yüzden Hızlı İşlemler'den başlatılmalıdır. Şifreyle girişteki güvenlik doğrulaması ise
+/// macOS web görünümünde açılır ve yalnızca sistem proxy'sini kullanır.
 struct RobloxGuideNote: View {
+    /// Roblox kurulu ama Hızlı İşlemler'de değilse "Ekle" düğmesi gösterilir.
+    var onAddRoblox: (() -> Void)?
+
+    static let bundleIdentifier = KnownApps.robloxBundleID
+
+    /// Kurulu Roblox uygulaması (bundle id veya /Applications/Roblox.app).
+    static func installedRobloxURL() -> URL? {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            return url
+        }
+        let fallback = URL(fileURLWithPath: "/Applications/Roblox.app")
+        return FileManager.default.fileExists(atPath: fallback.path) ? fallback : nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(L("Roblox ve oyunlar (deneysel)", "Roblox and games (experimental)"), systemImage: "gamecontroller")
+            Label("Roblox", systemImage: "gamecontroller")
                 .font(.subheadline.weight(.semibold))
             VStack(alignment: .leading, spacing: 3) {
                 Text(L("1. Önce DNS'i düzeltin: Ağ Ayarları'ndan 1.1.1.1 veya şifreli DNS (DoH) profili.",
                        "1. Fix DNS first: 1.1.1.1 or the encrypted DNS (DoH) profile in the Network tab."))
-                Text(L("2. ByeDPI'ı başlatın, ardından 'Sistem Proxy'yi açın.",
-                       "2. Start ByeDPI, then turn on 'System proxy'."))
-                Text(L("3. Roblox'u bundan sonra başlatın (açıksa tamamen kapatıp yeniden açın).",
-                       "3. Start Roblox after that (if it is open, quit it completely and reopen it)."))
+                Text(L("2. Roblox'u Hızlı İşlemler'e ekleyin ve her zaman oradan başlatın. Açıksa SplitWire onu (menü çubuğundaki Roblox simgesiyle birlikte) kapatıp yeniden açar.",
+                       "2. Add Roblox to Quick actions and always start it from there. If it is open, SplitWire quits it (together with the Roblox menu bar icon) and reopens it."))
+                Text(L("3. Şifreyle giriş yaparken Sistem Proxy'yi de açın: Roblox güvenlik doğrulamasını macOS'un web görünümünde açar ve bu görünüm yalnızca sistem proxy'sini kullanır (kapalıyken \"Security\" ekranı boş kalır). Giriş yaptıktan sonra kapatabilirsiniz.",
+                       "3. Turn on System proxy while signing in with a password: Roblox shows its security check in a macOS web view, which only uses the system proxy (otherwise the \"Security\" screen stays blank). You can turn it off after signing in."))
+                Text(L("4. Oyunlara Roblox uygulamasının içinden girin. Roblox'u menü çubuğundan tamamen kapattıysanız tarayıcıdaki \"Oyna\" düğmesi onu proxy'siz açar; o zaman Roblox'u kapatıp Hızlı İşlemler'den yeniden açın.",
+                       "4. Join games from inside the Roblox app. If you fully quit Roblox from the menu bar, the \"Play\" button in the browser opens it without the proxy; then quit Roblox and reopen it from Quick actions."))
             }
-            Text(L("Roblox'ta yalnızca web ve giriş trafiğinin ByeDPI'dan geçmesi, oyun trafiğinin (UDP) ise doğrudan gitmesi beklenir; bu yüzden ping'in etkilenmemesi beklenir. Sistem proxy açıkken bu ayarı kullanan diğer uygulamalar (ör. Safari) da ByeDPI'dan geçer. Bu yol deneyseldir, çünkü Roblox'un macOS proxy ayarlarını kullanmasına bağlıdır. İşe yaramazsa WireGuard sekmesini kullanın (ping daha yüksek olabilir).",
-                   "For Roblox, only web and login traffic is expected to go through ByeDPI, while game traffic (UDP) goes direct, so ping should stay about the same. While the system proxy is on, other apps that use it (such as Safari) also go through ByeDPI. This route is experimental because it depends on Roblox using the macOS proxy settings. If it doesn't work, use the WireGuard tab (ping may be higher)."))
+            if let onAddRoblox {
+                Button(L("Roblox'u Hızlı İşlemler'e Ekle", "Add Roblox to Quick actions"), action: onAddRoblox)
+                    .controlSize(.small)
+            }
+            Text(L("Yalnızca Roblox'un web ve giriş trafiği ByeDPI'dan geçer; oyun trafiği (UDP) doğrudan sunucuya gider, ping etkilenmez ve sunucu değiştirmek normal çalışır. İşe yaramazsa WireGuard sekmesini kullanın (ping daha yüksek olabilir).",
+                   "Only Roblox's web and login traffic goes through ByeDPI; game traffic (UDP) goes straight to the server, so ping isn't affected and switching servers works normally. If it doesn't work, use the WireGuard tab (ping may be higher)."))
                 .foregroundColor(.secondary)
         }
         .font(.caption)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// ByeDPI çalışırken bağlantı testi ve teşhisi (#15): "ByeDPI çalışıyor ama Discord açılmıyor"
+/// durumunu (DNS engeli, TLS 1.2'yi geçirmeyen yöntem) kullanıcıya gösterir.
+struct ConnectionTestView: View {
+    @ObservedObject var byedpiService: ByeDPIService
+    @ObservedObject private var tester = ConnectionTester.shared
+    @ObservedObject private var dns = DNSHealthChecker.shared
+
+    /// Sonuçlar şu an çalışan argümanlara mı ait (yöntem değişince eski sonuç gösterilmez)?
+    private var hasCurrentResults: Bool {
+        !tester.results.isEmpty && tester.testedArgs == byedpiService.runningArgs
+    }
+
+    private var diagnosis: ConnectionDiagnosis {
+        ConnectionDiagnosis.evaluate(tester.results, dnsPoisoned: tester.dnsPoisonedDuringTest)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(L("Bağlantı testi:", "Connection test:"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+                if tester.isTesting {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 16, height: 16)
+                }
+                Button(hasCurrentResults ? L("Tekrar Test Et", "Test again") : L("Test Et", "Test")) {
+                    Task { await byedpiService.runConnectionTest() }
+                }
+                .controlSize(.small)
+                .disabled(tester.isTesting || byedpiService.isProcessing)
+                .help(L("Discord, Discord'un güncelleme denetimi ve Roblox'a ByeDPI üzerinden bağlanmayı dener",
+                        "Tries to connect to Discord, Discord's update check and Roblox through ByeDPI"))
+            }
+
+            if hasCurrentResults && !tester.isTesting {
+                ForEach(tester.results) { result in
+                    HStack(spacing: 6) {
+                        Image(systemName: result.reachable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundColor(result.reachable ? .green : .red)
+                        Text(result.check.title.resolved)
+                    }
+                    .font(.caption)
+                    .help(result.detail)
+                }
+                Text(diagnosis.message(currentPreset: byedpiService.runningPreset ?? byedpiService.currentPreset).resolved)
+                    .font(.caption)
+                    .foregroundColor(diagnosis == .allReachable ? .secondary : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onChange(of: dns.lastChecked) { _ in
+            // DNS yeniden kontrol edildi (ör. 1.1.1.1'e geçildi): eski sonuçlar geçersiz, yeniden test et
+            guard byedpiService.isRunning, !tester.isTesting, !tester.results.isEmpty else { return }
+            Task { await byedpiService.runConnectionTest() }
+        }
     }
 }

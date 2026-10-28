@@ -13,7 +13,8 @@ struct ByeDPIPreset: Identifiable, Equatable, Hashable {
     /// Görünen adın iki dildeki hâli (durum mesajları dil değişince de doğru kalsın).
     var localizedName: LocalizedText {
         switch id {
-        case ByeDPIPresets.defaultID: return LT("Standart", "Standard")
+        case ByeDPIPresets.standardID: return LT("Standart", "Standard")
+        case ByeDPIPresets.defaultID: return LT("\(id) (önerilen)", "\(id) (recommended)")
         case ByeDPIPresets.customID: return LT("Özel", "Custom")
         default: return .verbatim(id)
         }
@@ -26,7 +27,12 @@ struct ByeDPIPreset: Identifiable, Equatable, Hashable {
 /// Tüm argümanlar macOS üzerinde doğrulanmıştır. Fake presetler macOS'ta
 /// desteklenmediği için (FAKE_SUPPORT yalnızca Linux/Windows) kaldırıldı.
 enum ByeDPIPresets {
-    static let defaultID = "Standart"
+    /// Varsayılan yöntem (#15). Discord'un macOS güncelleyicisi (updater.node) en çok TLS 1.2
+    /// konuşur; TLS 1.2'de sunucu sertifikası şifresiz gittiği için DPI bağlantıyı sertifikadan
+    /// tanıyıp keser. 2026-10 ölçümünde bunu geçiren tek hazır yöntem Split 2'ydi (TLS 1.3'te de çalışır).
+    static let defaultID = "Split 2"
+    /// v1.1.1'e kadarki varsayılan; yalnızca TLS 1.3 bağlantılarını geçiriyor.
+    static let standardID = "Standart"
     static let customID = "Custom"
 
     static let builtIn: [ByeDPIPreset] = [
@@ -50,20 +56,28 @@ enum ByeDPIPresets {
     }
 
     /// Seçili preset için kullanılacak argüman metni.
-    /// Custom seçiliyse kullanıcının argümanları, bilinmeyen bir id için Standart döner.
+    /// Custom seçiliyse kullanıcının argümanları, bilinmeyen bir id için varsayılan yöntem döner.
     static func args(for id: String, customArgs: String) -> String {
         if id == customID { return customArgs }
-        return preset(id: id)?.args ?? builtIn[0].args
+        return (preset(id: id) ?? preset(id: defaultID)!).args
     }
 
     /// Kayıtlı preset değerini doğrular/taşır.
     /// - `stored`: yeni anahtar ("byedpiPreset")
     /// - `legacy`: eski menü çubuğu anahtarı ("menuBarPreset")
-    /// Bilinmeyen ya da kaldırılmış presetler (ör. "Fake -1", "Fake 1") Standart'a döner.
+    /// Bilinmeyen ya da kaldırılmış presetler (ör. "Fake -1", "Fake 1") varsayılana döner.
     static func migrate(stored: String?, legacy: String?) -> String {
         let candidate = stored ?? legacy
         guard let candidate, preset(id: candidate) != nil else { return defaultID }
         return candidate
+    }
+
+    /// v1.1.2 tek seferlik geçişi (#15): eski varsayılan Standart, Discord'un güncelleme
+    /// denetimini (TLS 1.2) geçirmediği için Split 2'ye alınır. Kullanıcı daha sonra Standart'ı
+    /// yeniden seçerse `alreadyMigrated` true olduğundan bir daha değiştirilmez.
+    static func migrateOldDefault(_ id: String, alreadyMigrated: Bool) -> String {
+        guard !alreadyMigrated, id == standardID else { return id }
+        return defaultID
     }
 }
 
@@ -128,6 +142,24 @@ enum ByeDPIArguments {
 
     static func containsHTTPConnect(_ tokens: [String]) -> Bool {
         tokens.contains { $0 == "-G" || $0 == "--http-connect" }
+    }
+
+    /// Hızlı İşlemler'den başlatılan uygulamalara verilen ortam değişkenleri (#15, #13).
+    /// `--proxy-server` yalnızca Chromium ağ katmanını etkiler. Discord'un macOS güncelleyicisi
+    /// (Rust, reqwest) onu okumaz; 0.0.419 öncesi sürümleri macOS sistem proxy'sini de okumaz.
+    /// Roblox (libcurl) sistem proxy'sini okumaz. Hepsi HTTPS_PROXY'yi okur (ortam değişkeni
+    /// sistem proxy'sinden önce gelir). ciadpi -G ile aynı portta HTTP CONNECT kabul ettiği için `http://`.
+    /// HTTP_PROXY / ALL_PROXY bilerek yok: ciadpi düz HTTP proxy'si (GET http://...) değildir,
+    /// şifresiz HTTP istekleri bozulurdu.
+    static func proxyEnvironment(host: String = defaultHost, port: Int = defaultPort) -> [String: String] {
+        let proxy = "http://\(host):\(port)"
+        let bypass = "localhost,127.0.0.1,::1"
+        return [
+            "HTTPS_PROXY": proxy,
+            "https_proxy": proxy,
+            "NO_PROXY": bypass,
+            "no_proxy": bypass,
+        ]
     }
 
     /// Çalışan bir ciadpi'nin komut satırı (`ps -o args=`) HTTP CONNECT desteği içeriyor mu?

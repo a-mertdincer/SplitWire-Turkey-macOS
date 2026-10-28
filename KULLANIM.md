@@ -1,6 +1,6 @@
 # SplitWire-Turkey macOS - Kullanım Kılavuzu
 
-Bu kılavuz v1.1.1 içindir. Kısa özet ve İngilizce açıklama için [README.md](README.md), sürüm notları için [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md) ve [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) dosyalarına bakın.
+Bu kılavuz v1.1.2 içindir. Kısa özet ve İngilizce açıklama için [README.md](README.md), sürüm notları için [RELEASE_NOTES_v1.1.2.md](RELEASE_NOTES_v1.1.2.md), [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md) ve [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) dosyalarına bakın.
 
 İçindekiler:
 
@@ -8,14 +8,15 @@ Bu kılavuz v1.1.1 içindir. Kısa özet ve İngilizce açıklama için [README.
 2. [Arayüz](#arayüz)
 3. [Discord için hızlı başlangıç](#discord-için-hızlı-başlangıç)
 4. [ByeDPI](#byedpi)
-5. [Sistem Proxy](#sistem-proxy)
-6. [DNS ayarları](#dns-ayarları)
-7. [Şifreli DNS (DoH) profili](#şifreli-dns-doh-profili)
-8. [WireGuard / Cloudflare WARP](#wireguard--cloudflare-warp)
-9. [Dock simgesi, dil ve koyu mod](#dock-simgesi-dil-ve-koyu-mod)
-10. [Sorun giderme](#sorun-giderme)
-11. [Güncelleme (v1.1.0 ve v1.0.0'dan)](#güncelleme)
-12. [Tamamen kaldırma](#tamamen-kaldırma)
+5. [Roblox](#roblox)
+6. [Sistem Proxy](#sistem-proxy)
+7. [DNS ayarları](#dns-ayarları)
+8. [Şifreli DNS (DoH) profili](#şifreli-dns-doh-profili)
+9. [WireGuard / Cloudflare WARP](#wireguard--cloudflare-warp)
+10. [Dock simgesi, dil ve koyu mod](#dock-simgesi-dil-ve-koyu-mod)
+11. [Sorun giderme](#sorun-giderme)
+12. [Güncelleme (v1.1.1, v1.1.0 ve v1.0.0'dan)](#güncelleme)
+13. [Tamamen kaldırma](#tamamen-kaldırma)
 
 ---
 
@@ -23,7 +24,7 @@ Bu kılavuz v1.1.1 içindir. Kısa özet ve İngilizce açıklama için [README.
 
 Gereksinimler: macOS 13 veya üstü, Apple Silicon veya Intel Mac.
 
-1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.1.zip` dosyasını indirin ve çift tıklayarak açın.
+1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.2.zip` dosyasını indirin ve çift tıklayarak açın.
 2. `SplitWire-Turkey.app` dosyasını **Uygulamalar** klasörüne sürükleyin.
 3. Uygulamayı açın.
 
@@ -41,7 +42,7 @@ Uygulama ad-hoc imzalıdır; Apple Developer ID ile imzalanmamış ve notarize e
 İsteğe bağlı: Sürüm sayfasında `.sha256` dosyası da varsa, indirdiğiniz zip'i doğrulayabilirsiniz (iki dosya aynı klasördeyken):
 
 ```bash
-shasum -a 256 -c SplitWire-Turkey-v1.1.1.zip.sha256
+shasum -a 256 -c SplitWire-Turkey-v1.1.2.zip.sha256
 ```
 
 ---
@@ -55,7 +56,7 @@ shasum -a 256 -c SplitWire-Turkey-v1.1.1.zip.sha256
 | Sekme | İçerik |
 |---|---|
 | WireGuard | Cloudflare WARP tüneli: kurulum, açılışta otomatik bağlanma seçeneği, bağlan/bağlantıyı kes, kaldırma |
-| ByeDPI (açılışta seçili) | DNS uyarısı, ByeDPI durumu, Hızlı İşlemler, DPI yöntemleri, Discord ayarları |
+| ByeDPI (açılışta seçili) | DNS uyarısı, ByeDPI durumu ve bağlantı testi, Hızlı İşlemler, DPI yöntemleri, Roblox notu, Gelişmiş (Discord sorun giderme) |
 | Ağ Ayarları | DNS durumu, DNS sunucusu seçimi, DNS önbelleği, şifreli DNS (DoH) profili |
 | Hakkında | Sürüm (derleme numarası ve commit dahil), emeği geçenler, GitHub / Sorun Bildir / Sürümler bağlantıları |
 
@@ -79,12 +80,13 @@ Pencereyi kapatmak uygulamayı kapatmaz; uygulama menü çubuğunda çalışmaya
    1. **DNS'i Cloudflare (1.1.1.1) Yap**'a basın ve yönetici parolanızı girin.
    2. Kutu birkaç saniye içinde kaybolmazsa **Şifreli DNS (DoH) Profili…** ile profili yükleyin ([adımlar](#şifreli-dns-doh-profili)).
    3. **Tekrar Kontrol Et** ile doğrulayın.
-3. **Hızlı İşlemler** bölümündeki **Discord** simgesine tıklayın.
+3. **Hızlı İşlemler** bölümündeki **Discord** simgesine tıklayın. Discord, `--proxy-server` parametresi ve `HTTPS_PROXY` ortam değişkeniyle açılır ([ayrıntılar](#proxy-parametresi-ve-https_proxy)).
    - Discord açıksa **Kapat ve Yeniden Başlat**'ı seçin. 8 saniye içinde kapanmazsa zorla kapatmak isteyip istemediğiniz sorulur.
-   - Discord'u her seferinde buradan başlatın. Dock veya Spotlight'tan açılan Discord proxy kullanmaz.
-4. Hâlâ bağlanmıyorsa **Önceden Hazır Ayarlar** bölümünden başka bir yöntem seçin.
+   - Discord'u her seferinde buradan başlatın. Dock veya Spotlight'tan açılan Discord'a proxy parametresi ve `HTTPS_PROXY` verilmez; açılıştaki güncelleme denetimi geçemez ve Discord "Checking for updates…" ekranında kalabilir. (Discord 0.0.419 ve sonrası sistem proxy'sini de okur; ByeDPI çalışırken [Sistem Proxy](#sistem-proxy) açıksa Dock'tan açılan Discord da ByeDPI'dan geçer.)
+   - Discord güncellemeyi kurup kendini yeniden başlatırsa SplitWire onu ByeDPI ile yeniden açar ([ayrıntılar](#kendini-yeniden-başlatan-uygulamalar)).
+4. **ByeDPI Durumu** bölümündeki [bağlantı testinin](#bağlantı-testi) sonucuna bakın. "Discord güncelleme denetimi (TLS 1.2)" başarısızsa **Önceden Hazır Ayarlar** bölümünden **Split 2 (önerilen)**'yi seçin; zaten seçiliyse [DPI yöntemi seçme](#dpi-yöntemi-seçme) bölümündeki sırayla başka bir yöntem deneyin.
 
-> İpucu: Discord sürekli "update failed" diyorsa **Gelişmiş > Discord Ayarları** bölümündeki satırları Discord'un `settings.json` dosyasına ekleyerek otomatik güncellemeleri kapatabilirsiniz. **settings.json Klasörünü Aç** düğmesi dosyayı Finder'da gösterir.
+> İpucu: Discord "Checking for updates…" ekranında kalıyorsa veya "update failed" diyorsa [Sorun giderme](#sorun-giderme) bölümüne bakın. Eski rehberlerdeki `SKIP_HOST_UPDATE` / `SKIP_MODULE_UPDATE` ayarları güncel macOS Discord'da etkisizdir; gerek yoktur.
 
 ---
 
@@ -100,15 +102,37 @@ ByeDPI (ciadpi), bu Mac'te `127.0.0.1:1080` adresinde dinleyen yerel bir proxy'd
 - Önceki bir oturumdan kalmış bir ciadpi çalışıyorsa durum **Çalışıyor (harici süreç)** olarak görünür. Seçili yöntemi uygulamak için durdurup yeniden başlatın.
 - v1.0.0'dan kalma bir ciadpi tüm ağ arayüzlerinde dinliyorsa (aynı ağdaki herkes proxy'yi kullanabilir) ByeDPI sekmesinde kırmızı, menü çubuğunda turuncu uyarı görünür ve uygulama **Güvenli Yeniden Başlat** ile yalnızca `127.0.0.1`'de yeniden başlatmayı önerir. Süreç başka bir kullanıcıya aitse **Tümünü Zorla Kapat**'ı kullanın.
 
+### Bağlantı testi
+
+ByeDPI başlayınca ve yöntem değişince SplitWire, ByeDPI'ın HTTPS proxy'si (HTTP CONNECT) üzerinden üç adrese bağlanmayı dener. Discord'un güncelleme denetimi ve Roblox da bu yoldan geçer. Testi **ByeDPI Durumu** bölümündeki **Test Et** / **Tekrar Test Et** düğmesiyle elle de çalıştırabilirsiniz.
+
+| Satır | Adres |
+|---|---|
+| Discord (uygulama) | `https://discord.com/api/v9/gateway` |
+| Discord güncelleme denetimi (TLS 1.2) | `https://updates.discord.com/distributions/app/manifests/latest?…` (TLS en çok 1.2, Discord'un güncelleyicisi gibi) |
+| Roblox | `https://clientsettings.roblox.com/v2/client-version/MacPlayer` |
+
+Sunucu herhangi bir HTTP yanıtı verirse satır başarılı sayılır. Başarısız satırın üzerine fareyle gelince hata nedeni görünür. Satırların altında bir teşhis yazar:
+
+| Sonuç | Teşhis |
+|---|---|
+| Hepsi geçti | ByeDPI üzerinden Discord (güncelleme denetimi dahil) ve Roblox'a ulaşılabiliyor. |
+| Yalnızca Discord güncelleme denetimi başarısız | Yöntem TLS 1.2'yi geçirmiyor; Discord "Checking for updates…" ekranında kalır. **Split 2 (önerilen)**'yi seçin. Zaten Split 2'deyseniz Özel yöntemde ör. `-s 3 --tlsrec 1+s` deneyin. |
+| Hiçbiri geçmedi, DNS engeli algılanmış | ciadpi engelleme adresine bağlanıyor: önce DNS'i düzeltin ([DNS ayarları](#dns-ayarları)). |
+| Hiçbiri geçmedi | Başka bir yöntem deneyin; DNS'i de kontrol edin. |
+| Bazıları başarısız | Ulaşılamayanlar yazılır; başka bir yöntem deneyin. |
+
+Sonuçlar yalnızca o an çalışan yönteme aittir: yöntem değişince veya ByeDPI durunca silinir.
+
 ### DPI yöntemi seçme
 
 **Önceden Hazır Ayarlar** bölümündeki listeden veya menü çubuğu > **DPI Yöntemi**'nden seçin. Seçim kaydedilir ve uygulama yeniden açıldığında korunur. ByeDPI çalışıyorsa yeni yöntemle otomatik yeniden başlar. Yeni yöntem başlatılamazsa ByeDPI önceki yöntemle yeniden açılır; o da olmazsa sistem proxy kapatılır (internetiniz kesilmesin diye).
 
 | Yöntem | ciadpi parametreleri |
 |---|---|
-| Standart (varsayılan) | `-r 1+s` |
+| Standart | `-r 1+s` |
 | Split 1 | `-s 1 --tlsrec 1+s` |
-| Split 2 | `-s 2 --tlsrec 1+s` |
+| Split 2 (önerilen, varsayılan) | `-s 2 --tlsrec 1+s` |
 | Disorder | `--disorder 1 --auto=torst --tlsrec 1+s` |
 | Disorder SNI | `-d 1+s --tlsrec 1+s` |
 | OOB | `-o 1 --auto=torst` |
@@ -116,31 +140,105 @@ ByeDPI (ciadpi), bu Mac'te `127.0.0.1:1080` adresinde dinleyen yerel bir proxy'd
 | Split + Disorder | `-s 1+s -d 3+s --tlsrec 1+s` |
 | Özel | Kendi parametreleriniz |
 
-Fake yöntemleri kaldırıldı: macOS'taki ciadpi sahte paket gönderemez.
+Split 2, listede ve menü çubuğunda **Split 2 (önerilen)** olarak görünür. Fake yöntemleri kaldırıldı: macOS'taki ciadpi sahte paket gönderemez. Fake veya bilinmeyen bir yöntem kayıtlıysa Split 2'ye dönülür.
 
-Önerilen deneme sırası: önce **Standart**; olmazsa **Disorder**, **Split + Disorder**, **Disorder SNI**, **Split 2**, **OOB**. Bir site açılmıyorsa önce DNS uyarısını kontrol edin; sorun çoğu zaman DNS'tir.
+**Neden Split 2?** Discord'un açılıştaki güncelleme denetimi en çok TLS 1.2 kullanır. TLS 1.2'de sunucu sertifikası şifresiz gittiği için operatörün DPI'ı bağlantıyı sertifikadan tanıyıp kesebilir. 28 Ekim 2026'da bir Türk operatöründe yapılan ölçümde Split 2 dışındaki tüm hazır yöntemler TLS 1.3'ü geçirdi, ama TLS 1.2 bağlantısı sunucunun ilk 1400 baytından sonra kesildi. Split 2 (ve `-s N` ile N≥2 olan parametreler) ikisini de geçirdi: `discord.com`, `updates.discord.com`, `gateway.discord.gg`, `cdn.discordapp.com`, `discordapp.com`, `www.roblox.com`, `clientsettings.roblox.com`, `apis.roblox.com`, `auth.roblox.com`. Ölçüm tek operatörde yapıldı; bağlantı testinde "Discord güncelleme denetimi" başarısızsa başka yöntemleri deneyin ve sonucu bildirin.
+
+**Standart** artık varsayılan değil ama seçilebilir. v1.1.1'den yükseltirken yönteminiz Standart ise bir kez Split 2'ye geçirilirsiniz ve durum mesajı bunu söyler. Standart'ı yeniden seçerseniz bir daha değiştirilmez.
+
+Önerilen deneme sırası: önce **Split 2**; olmazsa Özel yöntemde `-s 3 --tlsrec 1+s`; sonra **Standart**, **Disorder**, **Split + Disorder**, **Disorder SNI**, **OOB**. Son gruptaki yöntemler ölçümde TLS 1.2'yi geçirmedi; bunlardan birini seçerseniz bağlantı testinde "Discord güncelleme denetimi" satırına bakın. Bir site açılmıyorsa önce DNS uyarısını kontrol edin; sorun çoğu zaman DNS'tir.
 
 ### Özel (Custom) parametreler
 
 1. **Özel Parametreleri Düzenle**'ye basın: Özel moda geçilir. Kaydettiğiniz özel parametreler korunur; metin kutusu yalnızca boşsa veya hazır yöntemlerden biriyle aynıysa seçili yöntemin parametreleriyle doldurulur.
-2. Metin kutusuna ciadpi parametrelerini yazın (ör. `-s 1 --tlsrec 1+s`). Birden çok satır ve tırnaklı değerler desteklenir.
+2. Metin kutusuna ciadpi parametrelerini yazın (ör. `-s 3 --tlsrec 1+s`). Birden çok satır ve tırnaklı değerler desteklenir.
 3. **Uygula**'ya basın. ByeDPI çalışıyorsa bu parametrelerle yeniden başlar. Parametreler boşsa ByeDPI önceki yöntemle çalışmaya devam eder.
 
-`-i 127.0.0.1`, `-p 1080` ve `-G` otomatik eklenir. Bunları kendiniz yazarsanız sizinki kullanılır; değiştirmeniz önerilmez (uygulamanın geri kalanı 127.0.0.1:1080 varsayar). `-G` (`--http-connect`), sistem HTTPS proxy'sinin kullandığı HTTP CONNECT isteklerini aynı portta kabul eder; SOCKS5 bağlantılarını etkilemez. Parametreler kaydedilir.
+`-i 127.0.0.1`, `-p 1080` ve `-G` otomatik eklenir. Bunları kendiniz yazarsanız sizinki kullanılır; değiştirmeniz önerilmez (uygulamanın geri kalanı 127.0.0.1:1080 varsayar). `-G` (`--http-connect`), sistem HTTPS proxy'sinin, Hızlı İşlemler'in verdiği `HTTPS_PROXY`'nin ve bağlantı testinin kullandığı HTTP CONNECT isteklerini aynı portta kabul eder; SOCKS5 bağlantılarını etkilemez. Parametreler kaydedilir.
 
 ### Hızlı İşlemler (uygulama başlatma)
 
 - **Uygulama ekle:** Hızlı İşlemler başlığındaki **+** > **Applications Klasöründen Seç**.
-- **Başlat:** Uygulama simgesine tıklayın. ByeDPI kapalıysa önce otomatik başlatılır, ardından uygulama proxy parametresiyle açılır.
-- **Düzenle / Kaldır:** Simgenin üzerine gelince çıkan kalem ve çarpı düğmeleri. Varsayılan başlatma parametresi `--proxy-server=socks5://127.0.0.1:1080`'dir; **Varsayılana Sıfırla** ile geri dönebilirsiniz.
+- **Başlat:** Uygulama simgesine tıklayın. ByeDPI kapalıysa önce otomatik başlatılır, ardından uygulama proxy parametresi ve proxy ortam değişkenleriyle açılır. Uygulama zaten açıksa **Kapat ve Yeniden Başlat** önerilir: parametre ve ortam değişkenleri yalnızca yeni başlatılan uygulamaya verilebilir.
+- **Düzenle / Kaldır:** Simgenin üzerine gelince çıkan kalem ve çarpı düğmeleri. Varsayılan başlatma parametresi `--proxy-server=socks5://127.0.0.1:1080`'dir (**Roblox'u Hızlı İşlemler'e Ekle** ile eklenen Roblox'ta boştur: Roblox bu parametreyi kullanmaz); **Varsayılana Sıfırla** ile geri dönebilirsiniz. Ortam değişkenleri düzenlenemez; her uygulamaya verilir.
+- DNS engeli algılanmışken bir uygulama başlatırsanız durum mesajı bunu söyler: DNS düzeltilmeden bağlanılamaz.
 
-Proxy parametresi yalnızca Chromium/Electron tabanlı uygulamalarda çalışır (Discord, Chrome, Brave, Edge, Slack, Spotify…). Safari için [Sistem Proxy](#sistem-proxy)'yi (SOCKS + HTTPS), Roblox için önce [deneysel Roblox yolunu](#roblox-deneysel), diğer oyunlar için [WireGuard](#wireguard--cloudflare-warp)'ı kullanın.
+#### Proxy parametresi ve HTTPS_PROXY
+
+Hızlı İşlemler'den açılan her uygulamaya iki şey verilir:
+
+| | Değer | Kim kullanır? |
+|---|---|---|
+| Proxy parametresi | `--proxy-server=socks5://127.0.0.1:1080` | Chromium/Electron ağ katmanı: Discord pencereleri, Chrome, Brave, Edge, Slack, Spotify… |
+| Ortam değişkenleri | `HTTPS_PROXY` ve `https_proxy` = `http://127.0.0.1:1080`; `NO_PROXY` ve `no_proxy` = `localhost,127.0.0.1,::1` | Discord'un güncelleme denetimi, Roblox (libcurl) ve bu değişkeni okuyan diğer programlar |
+
+- Discord'un güncelleme denetimi `--proxy-server` parametresini kullanmaz; 0.0.419'dan önceki sürümleri macOS sistem proxy'sini de okumaz; hepsi `HTTPS_PROXY`'yi okur. Discord bu denetim başarılı olmadan açılmadığı için ikisi de gerekir ([#15](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/15)).
+- `HTTPS_PROXY`, ByeDPI'ın aynı porttaki HTTP CONNECT desteğini (`-G`) kullanır. `HTTP_PROXY` ve `ALL_PROXY` bilerek verilmez: ciadpi düz HTTP proxy'si değildir, şifresiz HTTP istekleri bozulurdu.
+- Ortam değişkenleri uygulamanın alt süreçlerine de geçer. ByeDPI'ı durdurduğunuzda bu uygulamaları kapatıp normal şekilde açın.
+- Çalışan ByeDPI uygulama dışında (ör. eski bir sürümle) `-G` olmadan başlatılmışsa uygulama yine açılır ama SplitWire uyarır: Discord'un güncelleme denetimi gibi bağlantılar geçemez. ByeDPI'ı durdurup yeniden başlatın.
+
+Safari gibi macOS proxy ayarlarını kullanan uygulamalar için [Sistem Proxy](#sistem-proxy)'yi (SOCKS + HTTPS), Roblox için [Roblox yolunu](#roblox), hiçbirini kullanmayan oyunlar için [WireGuard](#wireguard--cloudflare-warp)'ı kullanın.
+
+#### Kendini yeniden başlatan uygulamalar
+
+Discord güncellemeyi kurduktan sonra yeni sürümü parametresiz ve ortam değişkensiz açar; yeni sürüm yine "Checking for updates…" ekranında kalırdı. SplitWire bunu algılar:
+
+- Hızlı İşlemler'den açılan bir uygulama kapandıktan sonra 30 saniye içinde aynı uygulamanın yeni bir örneği açılırsa SplitWire bunu kendi kendine yeniden başlatma sayar, yeni örneği sormadan kapatır ve uygulamayı ByeDPI ile yeniden açar. Durum mesajı bunu söyler.
+- Döngüye karşı aynı uygulama için 10 dakikada en çok 3 kez yapılır.
+- Yeni örnek parametrelerle zaten açıldıysa dokunulmaz; bu durum 3 kezlik sınıra sayılmaz.
+- ByeDPI çalışmıyorsa yeniden açılmaz; durum mesajı ByeDPI'ı başlatıp uygulamayı Hızlı İşlemler'den açmanızı söyler.
+- Uygulamayı kendiniz kapatıp 30 saniye içinde Dock'tan açarsanız bu da yeniden başlatma sayılır ve uygulama ByeDPI ile yeniden açılır. 30 saniyeden sonra açarsanız karışılmaz (o zaman proxy de kullanılmaz).
+- Roblox için çalışmaz: macOS, Roblox açıldığında bildirim göndermez ([Roblox nasıl yeniden başlatılır](#roblox-nasıl-yeniden-başlatılır)). Roblox'u her zaman Hızlı İşlemler'den başlatın.
+
+### Gelişmiş
+
+ByeDPI sekmesinin en altındaki **Gelişmiş** bölümü, Discord "Checking for updates…" ekranında kalıyorsa yapılacakları özetler ([Sorun giderme](#sorun-giderme)). **Discord Günlüklerini Aç** düğmesi Discord'un günlük klasörünü (`~/Library/Application Support/discord/logs`) Finder'da açar; sorun bildirirken günlükleri ekleyin.
+
+v1.1.1'e kadar bu bölümde önerilen `SKIP_HOST_UPDATE` / `SKIP_MODULE_UPDATE` ayarları kaldırıldı: güncel macOS Discord'da etkisizdir, gerek yoktur.
+
+---
+
+## Roblox
+
+Ölçümlere göre Roblox'un web/giriş adresleri (`www.roblox.com`, `clientsettings.roblox.com`, `gamejoin.roblox.com`, `apis.roblox.com`) Discord ile aynı şekilde engelleniyor: Operatör DNS'i engelleme adresi (`195.175.254.2`) döndürüyor, doğru adresle bile doğrudan TLS bağlantısı DPI'a takılıyor; ByeDPI üzerinden ise erişilebiliyor ([#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)).
+
+Roblox'un macOS istemcisi (libcurl) `--proxy-server` parametresini de macOS sistem proxy'sini de kullanmaz; v1.1.1'deki Sistem Proxy yolunun işe yaramamasının nedeni buydu. Ama `HTTPS_PROXY` ortam değişkenini okur ve [Hızlı İşlemler](#proxy-parametresi-ve-https_proxy) bunu verir. Bu şekilde başlatılan Roblox'un tüm HTTPS trafiği (`apis`, `auth`, `clientsettings`, `gamejoin`, `ecsv2`, `realtime-signalr` … `.roblox.com`) ByeDPI'dan geçer. Proxy olmadan Roblox'un günlüklerinde `SslConnectFail` (bağlantı TLS sırasında kesiliyor, ör. `ecsv2.roblox.com`: SNI engeli) ve `TlsVerificationFail` (ad engelleme adresine çözülüyor) hataları görünür ve giriş yapılamaz.
+
+Şifreyle girişte ikinci bir adım var: şifreyi gönderdikten sonra, giriş tamamlanmadan önce Roblox bir güvenlik doğrulaması ("Security" ekranı) gösterir ve bunu macOS'un web görünümünde açar (`https://www.roblox.com/challenge/…`). Bu web görünümü `HTTPS_PROXY`'yi değil, yalnızca macOS sistem proxy'sini kullanır. Sistem proxy kapalıyken `www.roblox.com` engellendiği için sayfa yüklenmez, "Security" ekranı boş kalır ve giriş ilerlemez. Doğrulamadaki captcha sağlayıcıları (Arkose Labs, hCaptcha) engelli değildir.
+
+1. Önce DNS'i düzeltin: **Ağ Ayarları**'ndan 1.1.1.1 veya [şifreli DNS (DoH) profili](#şifreli-dns-doh-profili). DNS uyarısı Roblox'u da kontrol eder.
+2. Roblox'u Hızlı İşlemler'e ekleyin ve her zaman oradan başlatın. Roblox kuruluysa ve Hızlı İşlemler'de yoksa ByeDPI sekmesindeki Roblox notunda **Roblox'u Hızlı İşlemler'e Ekle** düğmesi görünür; bu düğme Roblox'u proxy parametresi olmadan ekler (Roblox onu kullanmaz, `HTTPS_PROXY` yeterli). **+** > **Applications Klasöründen Seç** ile `Roblox.app`'i seçerek de ekleyebilirsiniz. Roblox açıksa SplitWire onu (menü çubuğundaki Roblox simgesiyle birlikte) kapatıp yeniden açar ([ayrıntılar](#roblox-nasıl-yeniden-başlatılır)).
+3. Şifreyle giriş yaparken [Sistem Proxy](#sistem-proxy)'yi de açın. Giriş yaptıktan sonra kapatabilirsiniz; "Security" ekranı yine boş kalırsa tekrar açın. Sistem Proxy kapalıyken Roblox'u Hızlı İşlemler'den başlatırsanız (DNS uyarısı yoksa) durum mesajı bunu hatırlatır: "Roblox ByeDPI proxy ile başlatıldı. Şifreyle giriş yapacaksanız güvenlik doğrulaması için Sistem Proxy'yi de açın."
+4. Oyunlara Roblox uygulamasının içinden girin. Roblox'u menü çubuğundan tamamen kapattıysanız tarayıcıdaki **Oyna** düğmesi onu proxy'siz açar; o zaman Roblox'u kapatıp Hızlı İşlemler'den yeniden açın.
+
+- Yalnızca Roblox'un web ve giriş trafiği ByeDPI'dan geçer. Oyun trafiği (UDP) doğrudan Roblox oyun sunucularına gider, proxy'den geçmez; bu yüzden proxy ping eklemez. Ölçümde ByeDPI üzerinden oyuna katılma başarılı oldu ve yeniden katılınca farklı bir sunucuya girildi: sunucu değiştirmek normal çalışır. (WARP/WireGuard ile [#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)'teki bir kullanıcı yalnızca tek bir sunucuya girebildi ve ping yüksekti.)
+- [Bağlantı testindeki](#bağlantı-testi) **Roblox** satırı, Roblox'un ayar sunucusuna (`clientsettings.roblox.com`) ByeDPI üzerinden ulaşılıp ulaşılamadığını gösterir.
+- Bu bölümdeki davranış 28 Ekim 2026'da tek bir Mac'te (macOS 27, Roblox 0.745.0.7451137), bir Türk operatöründe ölçüldü; başka operatörlerde farklı olabilir. Ping değerleri ölçülmedi. İşe yarasa da yaramasa da sonucu [#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13) üzerinden bildirirseniz çok yardımcı olur.
+- İşe yaramazsa [WireGuard](#wireguard--cloudflare-warp) kullanın. Tüm trafik WARP'tan geçtiği için ping daha yüksek olabilir ve bazı oyunlarda sunucu değiştirme sorunları yaşanabilir.
+
+### Roblox nasıl yeniden başlatılır
+
+Roblox ile menü çubuğundaki Roblox uygulaması (`Roblox.app` içindeki `RobloxMenuBar.app`) birbirini yaklaşık bir saniye içinde yeniden açar; kapatılan Roblox penceresiz olarak (menü çubuğu modunda) geri gelir. Yeni açılan örnek, onu açan sürecin ortam değişkenlerini alır: menü çubuğu uygulaması açık kalırsa Roblox'u `HTTPS_PROXY` olmadan geri açar. Menü çubuğu uygulaması çalışmıyorken Roblox'u kapatmak ise yalnızca penceresini kapatır; Roblox arka planda çalışmaya devam eder.
+
+Bu yüzden Roblox'u Hızlı İşlemler'den başlattığınızda SplitWire:
+
+- Menü çubuğu uygulamasını da kapatır. Roblox kapalı, yalnızca menü çubuğu uygulaması açıksa bunu sormadan yapar.
+- Geri açılan örneklere kapatma isteğini yeniden gönderir.
+- Roblox 3 saniye içinde kapanmazsa "Zorla kapatılsın mı?" diye sormadan zorla kapatır: **Kapat ve Yeniden Başlat**'ı zaten onayladınız ve oyun ilerlemesi sunucuda tutulur.
+- Roblox'u `HTTPS_PROXY` ile açar. Bu Roblox'un açtığı menü çubuğu uygulaması da değişkeni alır.
+
+Ölçümde başka bir proxy ayarıyla açılmış Roblox ve menü çubuğu uygulaması 2,9 saniyede, penceresi kapatılmış (arka planda çalışan) Roblox 5,3 saniyede proxy'li yeni örnekle değiştirildi.
+
+[Kendini yeniden başlatan uygulamalar](#kendini-yeniden-başlatan-uygulamalar) özelliği Roblox'u kapsamaz: Roblox'un `Info.plist` dosyasında `LSUIElement` açık olduğu için macOS, Roblox açıldığında SplitWire'a bildirim göndermez. Roblox proxy'siz açıldıysa (ör. tarayıcıdan) onu Hızlı İşlemler'den yeniden başlatın.
 
 ---
 
 ## Sistem Proxy
 
-Proxy parametresini desteklemeyen uygulamalar (ör. Safari, Roblox) için sistem genelinde proxy ayarı: hem **SOCKS proxy** hem de **güvenli web proxy'si (HTTPS)** `127.0.0.1:1080`'i gösterir.
+macOS proxy ayarlarını kullanan ama proxy parametresini desteklemeyen uygulamalar (ör. Safari) için sistem genelinde proxy ayarı: hem **SOCKS proxy** hem de **güvenli web proxy'si (HTTPS)** `127.0.0.1:1080`'i gösterir.
+
+- Roblox'un kendisi bu ayarı kullanmaz (onu [Hızlı İşlemler'den başlatın](#roblox)), ama şifreyle girişteki güvenlik doğrulaması kullanır: Roblox bu doğrulamayı macOS'un web görünümünde açar ve Sistem Proxy kapalıyken "Security" ekranı boş kalır. Şifreyle giriş yaparken açın; giriş yaptıktan sonra kapatabilirsiniz.
+- Discord 0.0.419 ve sonrası bu ayarı da okur: ByeDPI çalışırken Sistem Proxy açıksa Dock'tan veya oturum açılışında başlayan Discord da ByeDPI'dan geçer. Güncelleme denetimi yine en çok TLS 1.2 kullandığı için Split 2 gerekir.
 
 1. ByeDPI'ı başlatın.
 2. **Hızlı İşlemler > Sistem Proxy > Aç** ve yönetici parolanızı girin. Birincil ağ servisinizde (ör. Wi-Fi) SOCKS ve HTTPS proxy tek seferde `127.0.0.1:1080` olarak açılır. Düz web proxy'si (HTTP) ve proxy istisna (bypass) listesi değiştirilmez; ciadpi düz HTTP proxy isteklerini karşılayamadığı için HTTP proxy hiç kullanılmaz.
@@ -166,18 +264,6 @@ Proxy parametresini desteklemeyen uygulamalar (ör. Safari, Roblox) için sistem
   Oturum kapatma, yeniden başlatma ve bilgisayarı kapatma sırasında bu soru sorulmaz; proxy açık kalmışsa uygulama bir sonraki açılışta uyarır.
 - Elle kapatma: [Sorun giderme](#proxy-açık-kaldı-internet-çalışmıyor).
 
-### Roblox (deneysel)
-
-Roblox, Discord'un aksine `--proxy-server` parametresini yok sayar. Ölçümlere göre Roblox'un web/giriş adresleri (`www.roblox.com`, `clientsettings.roblox.com`, `gamejoin.roblox.com`, `apis.roblox.com`) Discord ile aynı şekilde engelleniyor: Operatör DNS'i engelleme adresi (`195.175.254.2`) döndürüyor, doğru adresle bile doğrudan TLS bağlantısı DPI'a takılıyor; ByeDPI üzerinden ise tüm yöntemlerle erişilebiliyor ([#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)).
-
-1. Önce DNS'i düzeltin: **Ağ Ayarları**'ndan 1.1.1.1 veya [şifreli DNS (DoH) profili](#şifreli-dns-doh-profili). DNS uyarısı Roblox'u da kontrol eder.
-2. ByeDPI'ı başlatın, ardından **Sistem Proxy > Aç**.
-3. Roblox'u bundan sonra başlatın (açıksa tamamen kapatıp yeniden açın).
-
-- Beklenen: Roblox'un yalnızca web/giriş trafiği ByeDPI'dan geçer; oyun trafiği (UDP, Roblox oyun sunucularına) doğrudan gider, bu yüzden ping'in etkilenmemesi beklenir. Sistem proxy açıkken bu ayarı kullanan diğer uygulamalar (ör. Safari) da ByeDPI'dan geçer.
-- **Deneysel:** Bu yol, Roblox macOS istemcisinin sistem proxy ayarlarını kullanmasına bağlıdır ve henüz doğrulanamadı. Sonucu [#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13) üzerinden bildirirseniz çok yardımcı olur.
-- İşe yaramazsa [WireGuard](#wireguard--cloudflare-warp) kullanın. Tüm trafik WARP'tan geçtiği için ping daha yüksek olur ve bazı oyunlarda sunucu değiştirme sorunları yaşanabilir.
-
 ---
 
 ## DNS ayarları
@@ -191,7 +277,7 @@ Uygulama açılışta Discord (`discord.com`, `gateway.discord.gg`) ve Roblox (`
 
 Sorun varsa ByeDPI ve Ağ Ayarları sekmelerinin üstünde turuncu uyarı görünür ve hangi servislerin etkilendiğini söyler (ör. "Discord ve Roblox için…"). Karar verilemiyorsa (ör. şifreli DNS'e ulaşılamadı) uyarı gösterilmez; yalnızca IPv4 adresleri karşılaştırılır.
 
-Neden önemli: ciadpi bağlanacağı adresi (SOCKS ve HTTPS proxy bağlantılarında) sistem DNS'i ile bulur. DNS engelleme adresi döndürüyorsa DPI aşılsa bile Discord'a veya Roblox'a bağlanılamaz.
+Neden önemli: ciadpi bağlanacağı adresi (SOCKS ve HTTPS proxy bağlantılarında) sistem DNS'i ile bulur. DNS engelleme adresi döndürüyorsa DPI aşılsa bile Discord'a veya Roblox'a bağlanılamaz. Bu durumda [bağlantı testinde](#bağlantı-testi) hiçbir satır geçmez ve teşhis önce DNS'i düzeltmenizi söyler; Hızlı İşlemler'den uygulama başlatırken de durum mesajı uyarır.
 
 ### DNS sunucusu seçme
 
@@ -235,7 +321,7 @@ Aynı bölmede (macOS 15+: Genel > Aygıt Yönetimi; macOS 13–14: Gizlilik ve 
 
 Bu mod Mac'in **tüm** internet trafiğini ve DNS sorgularını ücretsiz Cloudflare WARP üzerinden geçirir. ByeDPI ile çalışmayan uygulamalar (oyunlar vb.) için kullanışlıdır. macOS'ta uygulama bazlı bölünmüş tünel (yalnızca Discord gibi) desteklenmez.
 
-Tüm trafik tünelden geçtiği için çevrim içi oyunlarda gecikme (ping) artar ve bazı oyunlarda sunucu değiştirme sorunları yaşanabilir ([#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)). Roblox için önce [ByeDPI + Sistem Proxy yolunu](#roblox-deneysel) deneyin.
+Tüm trafik tünelden geçtiği için çevrim içi oyunlarda gecikme (ping) artar ve bazı oyunlarda sunucu değiştirme sorunları yaşanabilir ([#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13)). Roblox için önce [ByeDPI yolunu](#roblox) deneyin: Orada yalnızca Roblox'un web ve giriş trafiği proxy'den geçer, oyun trafiği doğrudan sunucuya gider.
 
 ### Gereksinimler
 
@@ -317,21 +403,37 @@ Pencerenin sağ üstündeki anahtar. Seçim kaydedilir.
 - **"Geliştirici doğrulanamadı":** [İlk açılış](#gatekeeper-uyarısı-ilk-açılış) adımlarını uygulayın.
 - **"Hasar görmüş, Çöp Sepeti'ne taşıyın":** v1.0.0'a özgü bir imza sorunuydu. v1.1.0'ı indirin. Yine görürseniz `xattr -dr com.apple.quarantine /Applications/SplitWire-Turkey.app` komutunu çalıştırın.
 
-### Discord / Roblox bağlanmıyor, Discord'da "update failed"
+### Discord "Checking for updates…" ekranında kalıyor veya "update failed" diyor
+
+Discord açılışta güncelleme denetimi yapar ve bu denetim başarılı olmadan açılmaz. Denetim `--proxy-server` parametresini kullanmaz; 0.0.419'dan önceki sürümleri macOS sistem proxy'sini de okumaz; hepsi `HTTPS_PROXY`'yi okur. Denetim en çok TLS 1.2 kullanır ([#15](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/15)). Sırayla:
+
+1. **DNS:** DNS uyarısı varsa önce [DNS ayarları](#dns-ayarları) adımlarını uygulayın.
+2. **Bağlantı testi:** **ByeDPI Durumu** bölümünde **Test Et** / **Tekrar Test Et**'e basın ([bağlantı testi](#bağlantı-testi)). Yalnızca "Discord güncelleme denetimi (TLS 1.2)" başarısızsa seçili yöntem TLS 1.2'yi geçirmiyordur: **Split 2 (önerilen)**'yi seçin. Zaten Split 2'deyseniz Özel yöntemde ör. `-s 3 --tlsrec 1+s` deneyin.
+3. **Yeniden başlatma:** Discord'u Hızlı İşlemler'den yeniden başlatın. Dock'tan, Spotlight'tan veya v1.1.1 ve öncesiyle başlatılmış Discord'a `HTTPS_PROXY` verilmemiştir.
+4. Çalışan ByeDPI uygulama dışında (ör. eski bir sürümle) `-G` olmadan başlatılmışsa güncelleme denetimi geçemez ve SplitWire bunu söyler: ByeDPI'ı durdurup yeniden başlatın.
+5. Hâlâ olmuyorsa **Gelişmiş > Discord Günlüklerini Aç** ile günlük klasörünü açın ve günlükleri issue'ya ekleyin. Gerekirse [WireGuard](#wireguard--cloudflare-warp) modunu deneyin.
+
+Eski rehberlerdeki `SKIP_HOST_UPDATE` / `SKIP_MODULE_UPDATE` ayarları güncel macOS Discord'da etkisizdir; gerek yoktur.
+
+### Roblox bağlanmıyor
 
 1. DNS uyarısını kontrol edin ve [DNS ayarları](#dns-ayarları) adımlarını uygulayın.
-2. Discord'u SplitWire'daki Hızlı İşlemler'den **yeniden başlatın**. Roblox için Sistem Proxy'nin açık olduğundan emin olun ve Roblox'u kapatıp yeniden açın.
-3. Başka bir DPI yöntemi deneyin.
-4. Hâlâ olmuyorsa [WireGuard](#wireguard--cloudflare-warp) modunu deneyin.
+2. Roblox'u Hızlı İşlemler'den başlattığınızdan emin olun ([Roblox](#roblox)). Dock'tan, Launchpad'den veya tarayıcıdaki **Oyna** ile açılan Roblox proxy kullanmaz. Sistem Proxy bunu düzeltmez: Roblox'un kendisi sistem proxy'sini kullanmaz.
+3. Şifreyle girişte "Security" ekranı boş kalıyor veya giriş ilerlemiyorsa ByeDPI çalışırken [Sistem Proxy](#sistem-proxy)'yi açın ve girişi yeniden deneyin. Güvenlik doğrulaması yalnızca sistem proxy'sini kullanır.
+4. Bağlantı testinde **Roblox** başarısızsa başka bir DPI yöntemi deneyin.
+5. Hâlâ olmuyorsa [WireGuard](#wireguard--cloudflare-warp) modunu deneyin ve sonucu [#13](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/issues/13) üzerinden bildirin.
 
-Terminal'den test (ByeDPI çalışırken):
+### Terminal'den bağlantı testi
+
+ByeDPI çalışırken:
 
 ```bash
 curl -I --socks5-hostname 127.0.0.1:1080 https://discord.com
-curl -I --proxy http://127.0.0.1:1080 https://www.roblox.com   # HTTPS proxy (HTTP CONNECT)
+curl -I --proxy http://127.0.0.1:1080 https://www.roblox.com                  # HTTPS proxy (HTTP CONNECT)
+curl -I --tls-max 1.2 --proxy http://127.0.0.1:1080 https://updates.discord.com # TLS 1.2 (Discord'un güncelleme denetimi gibi)
 ```
 
-`HTTP/2 200` (veya benzeri bir HTTP yanıtı) görürseniz proxy ve DNS çalışıyordur.
+`HTTP/2 200` (veya benzeri bir HTTP yanıtı) görürseniz proxy ve DNS çalışıyordur. Yalnızca son komut başarısızsa yöntem TLS 1.2'yi geçirmiyordur.
 
 ### "Port 1080 kullanımda"
 
@@ -383,19 +485,33 @@ pkill -9 -x ciadpi                 # ciadpi normal kill sinyalini yok sayar, -9 
 
 ## Güncelleme
 
+### v1.1.1'den yükseltme
+
+1. v1.1.1'den çıkın (sistem proxy açıksa çıkarken kapatılır).
+2. Yeni `SplitWire-Turkey.app`'i Uygulamalar klasöründeki eskisinin üzerine kopyalayın.
+
+Tüm ayarlarınız korunur (favori uygulamalar, özel parametreler, dil). Tek değişiklik: yönteminiz Standart ise bir kez Split 2 yapılır ve durum mesajı bunu söyler. İsterseniz Standart'ı yeniden seçebilirsiniz; bir daha değiştirilmez.
+
+- Discord açıksa Hızlı İşlemler'den bir kez yeniden başlatın: `HTTPS_PROXY` yalnızca yeni başlatılan uygulamaya verilebilir.
+- Roblox için v1.1.1'de yalnızca Sistem Proxy'yi açtıysanız bu yetmez: Roblox'un kendisi sistem proxy'sini kullanmaz. Roblox'u Hızlı İşlemler'e ekleyip her zaman oradan başlatın ([Roblox](#roblox)). Sistem Proxy'yi şifreyle giriş yaparken açık tutun: güvenlik doğrulaması ("Security" ekranı) onu kullanır. Giriş yaptıktan sonra kapatabilirsiniz.
+- Daha önce Gelişmiş bölümündeki tavsiyeyle Discord'un `settings.json` dosyasına `SKIP_HOST_UPDATE` / `SKIP_MODULE_UPDATE` eklediyseniz bunlar güncel macOS Discord'da etkisizdir.
+- DNS hâlâ şart: DNS uyarısı görüyorsanız önce onu düzeltin.
+
+Ayrıntılar: [RELEASE_NOTES_v1.1.2.md](RELEASE_NOTES_v1.1.2.md).
+
 ### v1.1.0'dan
 
 1. v1.1.0'dan çıkın (sistem proxy açıksa çıkarken kapatılır).
 2. Yeni `SplitWire-Turkey.app`'i Uygulamalar klasöründeki eskisinin üzerine kopyalayın.
 
-Tüm ayarlarınız korunur. v1.1.0'da Sistem Proxy'yi kullanıyorsanız, HTTPS proxy'nin de açılması için ByeDPI'ı başlatıp **Sistem Proxy > Aç**'a yeniden basın. v1.1.0'dan kalan yalnızca-SOCKS ayarı da algılanır ve ByeDPI durduğunda otomatik kapatılır. Ayrıntılar: [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md).
+Tüm ayarlarınız korunur. v1.1.0'da Sistem Proxy'yi kullanıyorsanız, HTTPS proxy'nin de açılması için ByeDPI'ı başlatıp **Sistem Proxy > Aç**'a yeniden basın. v1.1.0'dan kalan yalnızca-SOCKS ayarı da algılanır ve ByeDPI durduğunda otomatik kapatılır. [v1.1.1'den yükseltme](#v111den-yükseltme) notları da geçerlidir. Ayrıntılar: [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md).
 
 ### v1.0.0'dan
 
 1. v1.0.0'dan çıkın (menü çubuğu > Çıkış veya ⌘Q).
 2. Yeni `SplitWire-Turkey.app`'i Uygulamalar klasöründeki eskisinin üzerine kopyalayın ve [ilk açılış](#gatekeeper-uyarısı-ilk-açılış) adımlarını uygulayın.
 
-Ayarlarınız korunur: favori uygulamalar, koyu mod, dil ve menü çubuğunda seçtiğiniz DPI yöntemi taşınır. Kaldırılan Fake yöntemlerinden birini seçtiyseniz Standart'a dönülür. v1.0.0'ın işe yaramayan WireGuard klasör/tarayıcı ayarları silinir.
+Ayarlarınız korunur: favori uygulamalar, koyu mod, dil ve menü çubuğunda seçtiğiniz DPI yöntemi taşınır. Kaldırılan Fake yöntemlerinden birini seçtiyseniz varsayılan yönteme (Split 2) dönülür. v1.0.0'ın işe yaramayan WireGuard klasör/tarayıcı ayarları silinir.
 
 v1.0.0'da WireGuard kurulumu yarım kaldıysa v1.1.0'da **Kur ve Bağlan**'a basmanız yeterli; eski yapılandırma yenisiyle değiştirilir. v1.0.0'ın kurduğu otomatik başlatma (LaunchDaemon), **Açılışta otomatik bağlan** seçili değilse kaldırılır, seçiliyse yenisiyle değiştirilir.
 

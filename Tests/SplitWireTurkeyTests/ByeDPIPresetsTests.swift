@@ -32,18 +32,68 @@ final class ByeDPIPresetsTests: XCTestCase {
         XCTAssertEqual(ByeDPIPresets.args(for: "Custom", customArgs: "-s 3 -r 2"), "-s 3 -r 2")
         XCTAssertEqual(ByeDPIPresets.args(for: "Custom", customArgs: ""), "")
         XCTAssertEqual(ByeDPIPresets.args(for: "OOB", customArgs: "-s 3"), "-o 1 --auto=torst")
-        // Bilinmeyen preset -> Standart
-        XCTAssertEqual(ByeDPIPresets.args(for: "Fake -1", customArgs: "-s 3"), "-r 1+s")
+        // Bilinmeyen preset -> varsayılan (Split 2)
+        XCTAssertEqual(ByeDPIPresets.args(for: "Fake -1", customArgs: "-s 3"), "-s 2 --tlsrec 1+s")
+    }
+
+    /// #15: varsayılan, TLS 1.2'yi de geçiren Split 2; Standart seçilebilir bir yöntem olarak kalır.
+    func testDefaultIsSplit2() {
+        XCTAssertEqual(ByeDPIPresets.defaultID, "Split 2")
+        XCTAssertEqual(ByeDPIPresets.preset(id: ByeDPIPresets.defaultID)?.args, "-s 2 --tlsrec 1+s")
+        XCTAssertNotNil(ByeDPIPresets.preset(id: ByeDPIPresets.standardID))
+        XCTAssertEqual(ByeDPIService.defaultCustomArgs, "-s 2 --tlsrec 1+s")
     }
 
     func testMigration() {
-        XCTAssertEqual(ByeDPIPresets.migrate(stored: nil, legacy: nil), "Standart")
+        XCTAssertEqual(ByeDPIPresets.migrate(stored: nil, legacy: nil), "Split 2")
         XCTAssertEqual(ByeDPIPresets.migrate(stored: "OOB", legacy: "Split 1"), "OOB")
         XCTAssertEqual(ByeDPIPresets.migrate(stored: nil, legacy: "Split 2"), "Split 2")
-        XCTAssertEqual(ByeDPIPresets.migrate(stored: nil, legacy: "Fake -1"), "Standart")
-        XCTAssertEqual(ByeDPIPresets.migrate(stored: "Fake 1", legacy: nil), "Standart")
+        XCTAssertEqual(ByeDPIPresets.migrate(stored: nil, legacy: "Fake -1"), "Split 2")
+        XCTAssertEqual(ByeDPIPresets.migrate(stored: "Fake 1", legacy: nil), "Split 2")
         XCTAssertEqual(ByeDPIPresets.migrate(stored: "Custom", legacy: nil), "Custom")
-        XCTAssertEqual(ByeDPIPresets.migrate(stored: "Bogus", legacy: "Disorder"), "Standart")
+        XCTAssertEqual(ByeDPIPresets.migrate(stored: "Bogus", legacy: "Disorder"), "Split 2")
+    }
+
+    /// Eski varsayılan Standart yalnızca bir kez Split 2'ye alınır; diğer seçimlere dokunulmaz.
+    func testOldDefaultMigration() {
+        XCTAssertEqual(ByeDPIPresets.migrateOldDefault("Standart", alreadyMigrated: false), "Split 2")
+        XCTAssertEqual(ByeDPIPresets.migrateOldDefault("Standart", alreadyMigrated: true), "Standart")
+        XCTAssertEqual(ByeDPIPresets.migrateOldDefault("OOB", alreadyMigrated: false), "OOB")
+        XCTAssertEqual(ByeDPIPresets.migrateOldDefault("Custom", alreadyMigrated: false), "Custom")
+    }
+
+    @MainActor
+    func testServiceMigratesOldDefaultOnce() {
+        let suite = "SplitWireTurkeyTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // v1.1.1'den yükseltme: kayıtlı Standart → Split 2, kullanıcıya bilgi verilir
+        defaults.set("Standart", forKey: "byedpiPreset")
+        let upgraded = ByeDPIService(defaults: defaults, systemProxy: SystemProxyService())
+        XCTAssertEqual(upgraded.currentPreset, "Split 2")
+        XCTAssertEqual(defaults.string(forKey: "byedpiPreset"), "Split 2")
+        XCTAssertTrue(defaults.bool(forKey: ByeDPIService.defaultMigrationDefaultsKey))
+        XCTAssertEqual(upgraded.statusKind, .info)
+        XCTAssertFalse(upgraded.statusMessage.isEmpty)
+
+        // Kullanıcı Standart'ı yeniden seçti: bir sonraki açılışta korunur, mesaj yok
+        upgraded.selectPreset("Standart")
+        let later = ByeDPIService(defaults: defaults, systemProxy: SystemProxyService())
+        XCTAssertEqual(later.currentPreset, "Standart")
+        XCTAssertTrue(later.statusMessage.isEmpty)
+    }
+
+    @MainActor
+    func testFreshInstallUsesDefaultWithoutMessage() {
+        let suite = "SplitWireTurkeyTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let service = ByeDPIService(defaults: defaults, systemProxy: SystemProxyService())
+        XCTAssertEqual(service.currentPreset, "Split 2")
+        XCTAssertTrue(service.statusMessage.isEmpty)
+        XCTAssertTrue(defaults.bool(forKey: ByeDPIService.defaultMigrationDefaultsKey))
     }
 
     @MainActor
@@ -72,15 +122,15 @@ final class ByeDPIPresetsTests: XCTestCase {
     }
 
     @MainActor
-    func testRemovedLegacyPresetFallsBackToStandart() {
+    func testRemovedLegacyPresetFallsBackToDefault() {
         let suite = "SplitWireTurkeyTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
         defaults.set("Fake -1", forKey: "menuBarPreset")
         let service = ByeDPIService(defaults: defaults, systemProxy: SystemProxyService())
-        XCTAssertEqual(service.currentPreset, "Standart")
-        XCTAssertEqual(service.customArgs, "-r 1+s")
+        XCTAssertEqual(service.currentPreset, "Split 2")
+        XCTAssertEqual(service.customArgs, "-s 2 --tlsrec 1+s")
     }
 
     @MainActor
@@ -178,6 +228,20 @@ final class ByeDPIArgumentsTests: XCTestCase {
         XCTAssertFalse(ByeDPIArguments.commandLineSupportsHTTPConnect("ciadpi -i 127.0.0.1 -p 1080 -r 1+s"))
         XCTAssertFalse(ByeDPIArguments.commandLineSupportsHTTPConnect("ciadpi (PID 123)"))
         XCTAssertFalse(ByeDPIArguments.commandLineSupportsHTTPConnect(nil))
+    }
+
+    /// #15/#13: Discord'un güncelleyicisi ve Roblox için HTTPS_PROXY, ciadpi -G'ye (HTTP CONNECT).
+    /// HTTP_PROXY / ALL_PROXY verilmez: ciadpi düz HTTP proxy'si değildir.
+    func testProxyEnvironment() {
+        let env = ByeDPIArguments.proxyEnvironment()
+        XCTAssertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:1080")
+        XCTAssertEqual(env["https_proxy"], "http://127.0.0.1:1080")
+        XCTAssertEqual(env["NO_PROXY"], "localhost,127.0.0.1,::1")
+        XCTAssertEqual(env["no_proxy"], "localhost,127.0.0.1,::1")
+        for key in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
+            XCTAssertNil(env[key], key)
+        }
+        XCTAssertEqual(ByeDPIArguments.proxyEnvironment(port: 2080)["HTTPS_PROXY"], "http://127.0.0.1:2080")
     }
 
     func testCustomArgsMultilineBuild() {

@@ -63,7 +63,9 @@ final class ByeDPIService: ObservableObject {
     static let presetDefaultsKey = "byedpiPreset"
     static let legacyPresetDefaultsKey = "menuBarPreset"
     static let customArgsDefaultsKey = "byedpiCustomArgs"
-    static let defaultCustomArgs = "-r 1+s"
+    /// v1.1.2: eski varsayılan Standart → Split 2 geçişi yapıldı mı (bir kez, #15).
+    static let defaultMigrationDefaultsKey = "byedpiPresetMigratedToSplit2"
+    static let defaultCustomArgs = "-s 2 --tlsrec 1+s"
 
     let host = ByeDPIArguments.defaultHost
     /// SOCKS portu (uygulamanın geri kalanı 1080 varsayar; testler farklı port kullanabilir).
@@ -113,6 +115,15 @@ final class ByeDPIService: ObservableObject {
     private var isShuttingDown = false
     /// LAN'a açık dinleyicisi için zaten uyarı gösterilen PID'ler (bir kez sorulur).
     private var handledExposedPIDs = Set<Int32>()
+    /// Kendini proxy'siz yeniden başlatan favorileri yakalar (Discord güncellemesi, #15).
+    private lazy var selfRestartWatcher = SelfRestartWatcher(
+        currentFavorite: { id in AppState.shared.favoriteApps.first { $0.id == id } },
+        onSelfRestart: { [weak self] favorite, instance in
+            Task { await self?.relaunchAfterSelfRestart(favorite, newInstance: instance) }
+        }
+    )
+    /// Şu an yeniden açılan favoriler (aynı favori iki kez açılmasın; farklı favoriler birbirini beklemez).
+    private var relaunchingFavoriteIDs: Set<UUID> = []
 
     init(
         defaults: UserDefaults = .standard,
@@ -126,12 +137,20 @@ final class ByeDPIService: ObservableObject {
         // Varsayılan olmayan portta (testler) gerçek 127.0.0.1:1080 proxy'sine asla dokunulmaz
         self.systemProxy = systemProxy
             ?? (port == ByeDPIArguments.defaultPort ? SystemProxyService.shared : SystemProxyService(port: port))
-        self.currentPreset = ByeDPIPresets.migrate(
+        let stored = ByeDPIPresets.migrate(
             stored: defaults.string(forKey: Self.presetDefaultsKey),
             legacy: defaults.string(forKey: Self.legacyPresetDefaultsKey)
         )
+        let alreadyMigrated = defaults.bool(forKey: Self.defaultMigrationDefaultsKey)
+        self.currentPreset = ByeDPIPresets.migrateOldDefault(stored, alreadyMigrated: alreadyMigrated)
         self.customArgs = defaults.string(forKey: Self.customArgsDefaultsKey) ?? Self.defaultCustomArgs
         defaults.set(currentPreset, forKey: Self.presetDefaultsKey)
+        defaults.set(true, forKey: Self.defaultMigrationDefaultsKey)
+        if currentPreset != stored {
+            let name = ByeDPIPresets.preset(id: currentPreset)!.localizedName
+            setStatus(.info, LT("Yöntem Standart'tan \(name.tr) olarak değiştirildi: Discord'un açılıştaki güncelleme denetimi (TLS 1.2) Standart ile engelleniyor. İsterseniz Standart'ı yeniden seçebilirsiniz.",
+                                "The method was changed from Standard to \(name.en): Discord's startup update check (TLS 1.2) is blocked with Standard. You can choose Standard again if you want."))
+        }
     }
 
     // MARK: - İzleme
@@ -202,6 +221,7 @@ final class ByeDPIService: ObservableObject {
             if runningArgs != nil { runningArgs = nil }
             if runningPreset != nil { runningPreset = nil }
             runningTokens = nil
+            if wasRunning { clearConnectionTest() }
             if wasRunning && wasExternal {
                 setStatus(.warning, LT("Harici ByeDPI (ciadpi) süreci durdu.",
                                        "The external ByeDPI (ciadpi) process stopped."))
@@ -323,8 +343,10 @@ final class ByeDPIService: ObservableObject {
         if isRunning && !isExposedToNetwork { return true }
         guard !isProcessing else { return false }
         isProcessing = true
-        defer { isProcessing = false }
-        return await performStart(allowCleanupRetry: true)
+        let started = await performStart(allowCleanupRetry: true)
+        isProcessing = false
+        if started { scheduleConnectionTest() }
+        return started
     }
 
     /// Kullanıcı ByeDPI'ı durdurur; bizim sistem proxy'miz açıksa o da kapatılır.
@@ -372,12 +394,28 @@ final class ByeDPIService: ObservableObject {
             }
         }
         isProcessing = false
-        if !started {
+        if started {
+            scheduleConnectionTest()
+        } else {
             await disableSystemProxyAfterStop(
                 prefix: LT("ByeDPI yeni yöntemle başlatılamadı ve şu an çalışmıyor.",
                            "ByeDPI could not start with the new method and is not running.")
             )
         }
+    }
+
+    /// Başlatma veya yöntem değişiminden sonra bağlantıyı arka planda ölçer (#15).
+    /// Yalnızca gerçek 1080 örneği için: testlerdeki örnekler ağa istek göndermez.
+    private func scheduleConnectionTest() {
+        guard port == ByeDPIArguments.defaultPort, isRunning else { return }
+        let args = runningArgs
+        Task { await ConnectionTester.shared.run(host: host, port: port, args: args) }
+    }
+
+    /// Kullanıcı "Bağlantıyı Test Et"e bastı.
+    func runConnectionTest() async {
+        guard isRunning else { return }
+        await ConnectionTester.shared.run(host: host, port: port, args: runningArgs)
     }
 
     /// Tüm ciadpi süreçlerini zorla kapatır (gerekirse tek yönetici penceresi ile),
@@ -626,27 +664,42 @@ final class ByeDPIService: ObservableObject {
 
     // MARK: - Favori uygulamalar
 
-    /// ByeDPI'ı (gerekirse) başlatır ve uygulamayı proxy argümanlarıyla açar.
+    /// ByeDPI'ı (gerekirse) başlatır ve uygulamayı proxy argümanları ve HTTPS_PROXY ile açar.
     func launchFavoriteApp(_ app: AppState.FavoriteApp) async {
         if !isRunning {
             guard await start() else { return }
             // Proxy'nin dinlemeye başlaması için kısa pay
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
-        let arguments = ByeDPIArguments.tokenize(app.customArgs)
+        let previouslyTrackedPID = selfRestartWatcher.untrack(app)
         do {
-            let launched = try await AppLauncher.launch(
-                appPath: app.path,
-                name: app.name,
-                bundleIdentifier: app.bundleIdentifier,
-                arguments: arguments
-            )
-            if launched {
-                setStatus(.success, LT("\(app.name) ByeDPI proxy ile başlatıldı.",
-                                       "\(app.name) was launched with the ByeDPI proxy."))
-            } else {
+            guard let instance = try await openFavorite(app, confirmRestart: true) else {
+                // İptal: çalışan (daha önce bizim açtığımız) örneği izlemeye devam et
+                if let previouslyTrackedPID,
+                   let running = AppLauncher.runningInstances(appURL: URL(fileURLWithPath: app.path), bundleIdentifier: app.bundleIdentifier)
+                    .first(where: { $0.processIdentifier == previouslyTrackedPID }) {
+                    selfRestartWatcher.track(app, instance: running)
+                }
                 setStatus(.info, LT("\(app.name) başlatma iptal edildi.",
                                     "Launching \(app.name) was cancelled."))
+                return
+            }
+            selfRestartWatcher.track(app, instance: instance)
+            if isExternallyStarted, !ByeDPIArguments.commandLineSupportsHTTPConnect(runningArgs) {
+                setStatus(.warning, LT("\(app.name) başlatıldı, ancak çalışan ByeDPI bu uygulama dışında (ör. eski bir sürümle) başlatılmış ve HTTPS proxy desteği (-G) yok; Discord'un güncelleme denetimi gibi bağlantılar geçemez. ByeDPI'ı durdurup yeniden başlatın.",
+                                       "\(app.name) was launched, but the running ByeDPI was started outside this app (e.g. by an older version) without HTTPS proxy support (-G), so connections such as Discord's update check can't get through. Stop and restart ByeDPI."))
+            } else if DNSHealthChecker.shared.lastResult.isPoisoned {
+                setStatus(.warning, LT("\(app.name) ByeDPI proxy ile başlatıldı, ancak DNS engellemesi algılandı: DNS düzeltilmeden bağlanamaz. Yukarıdaki uyarıdan DNS'i düzeltin.",
+                                       "\(app.name) was launched with the ByeDPI proxy, but DNS blocking was detected: it can't connect until DNS is fixed. Fix DNS using the warning above."))
+            } else if (app.bundleIdentifier ?? Bundle(url: URL(fileURLWithPath: app.path))?.bundleIdentifier) == KnownApps.robloxBundleID,
+                      !systemProxy.isOurProxyActive {
+                // Roblox şifreyle girişte güvenlik doğrulamasını macOS web görünümünde açar; o da
+                // HTTPS_PROXY'yi değil sistem proxy'sini kullanır (yoksa "Security" ekranı boş kalır)
+                setStatus(.success, LT("\(app.name) ByeDPI proxy ile başlatıldı. Şifreyle giriş yapacaksanız güvenlik doğrulaması için Sistem Proxy'yi de açın.",
+                                       "\(app.name) was launched with the ByeDPI proxy. If you sign in with a password, also turn on System proxy for the security check."))
+            } else {
+                setStatus(.success, LT("\(app.name) ByeDPI proxy ile başlatıldı.",
+                                       "\(app.name) was launched with the ByeDPI proxy."))
             }
         } catch {
             let reason = error.localizedDescription
@@ -656,6 +709,53 @@ final class ByeDPIService: ObservableObject {
                 : LT("\(app.name) başlatılamadı: \(reason)", "Could not launch \(app.name): \(reason)")
             setStatus(.error, message)
             presentAlert(title: L("Hata", "Error"), message: reason, style: .warning)
+        }
+    }
+
+    private func openFavorite(_ app: AppState.FavoriteApp, confirmRestart: Bool) async throws -> NSRunningApplication? {
+        try await AppLauncher.launch(
+            appPath: app.path,
+            name: app.name,
+            bundleIdentifier: app.bundleIdentifier,
+            arguments: ByeDPIArguments.tokenize(app.customArgs),
+            environment: ByeDPIArguments.proxyEnvironment(host: host, port: port),
+            confirmRestart: confirmRestart
+        )
+    }
+
+    /// Hızlı İşlemler'den açılan uygulama kendini proxy'siz yeniden başlattı (ör. Discord
+    /// güncellemeyi kurdu ve yeni sürümü argümansız açtı; yine "Checking for updates…"ta kalırdı, #15):
+    /// ByeDPI ile yeniden açar.
+    private func relaunchAfterSelfRestart(_ app: AppState.FavoriteApp, newInstance: NSRunningApplication) async {
+        guard !isShuttingDown else { return }
+        guard isRunning else {
+            setStatus(.warning, LT("\(app.name) kendini yeniden başlattı, ancak ByeDPI çalışmıyor. ByeDPI'ı başlatıp \(app.name) uygulamasını Hızlı İşlemler'den yeniden açın.",
+                                   "\(app.name) restarted itself, but ByeDPI isn't running. Start ByeDPI and open \(app.name) again from Quick actions."))
+            return
+        }
+        // İlk await'ten önce işaretle: aynı favori için arka arkaya gelen kararlar ikinci kez açmasın
+        guard relaunchingFavoriteIDs.insert(app.id).inserted else { return }
+        defer { relaunchingFavoriteIDs.remove(app.id) }
+        // Electron'un app.relaunch()'u argümanları (ve ortamı) korur: o zaman dokunma
+        let arguments = ByeDPIArguments.tokenize(app.customArgs)
+        if !arguments.isEmpty,
+           SelfRestartPolicy.commandLine(await Self.commandLine(of: newInstance.processIdentifier), containsAll: arguments) {
+            selfRestartWatcher.track(app, instance: newInstance)
+            return
+        }
+        // Yeni örnek açılışını tamamlasın; erken gönderilen kapatma isteği kaybolabilir
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard isRunning, !isShuttingDown else { return }
+        do {
+            guard let instance = try await openFavorite(app, confirmRestart: false) else { return }
+            selfRestartWatcher.track(app, instance: instance)
+            selfRestartWatcher.recordRelaunch(app)
+            setStatus(.info, LT("\(app.name) kendini (ör. güncellemeden sonra) proxy'siz yeniden başlattı; ByeDPI proxy ile yeniden açıldı.",
+                                "\(app.name) restarted itself without the proxy (e.g. after an update); it was reopened with the ByeDPI proxy."))
+        } catch {
+            let reason = error.localizedDescription
+            setStatus(.error, LT("\(app.name) proxy ile yeniden açılamadı: \(reason)",
+                                 "Could not reopen \(app.name) with the proxy: \(reason)"))
         }
     }
 
@@ -799,6 +899,7 @@ final class ByeDPIService: ObservableObject {
         runningArgs = nil
         runningPreset = nil
         runningTokens = nil
+        clearConnectionTest()
 
         let tail = stderrBuffer.text
         let suffix = tail.isEmpty ? "" : "\n\(tail)"
@@ -856,6 +957,12 @@ final class ByeDPIService: ObservableObject {
         runningArgs = nil
         runningPreset = nil
         runningTokens = nil
+        clearConnectionTest()
+    }
+
+    private func clearConnectionTest() {
+        guard port == ByeDPIArguments.defaultPort else { return }
+        ConnectionTester.shared.clear()
     }
 
     // MARK: - Yardımcılar
