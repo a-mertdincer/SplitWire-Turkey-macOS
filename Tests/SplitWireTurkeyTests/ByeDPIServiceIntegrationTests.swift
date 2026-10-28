@@ -222,6 +222,55 @@ final class ByeDPIServiceIntegrationTests: XCTestCase {
         }
     }
 
+    /// CONNECT hedefi istek satırından okunur: macOS'un ağ yığını (URLSession, WebKit, Safari) `Host`
+    /// başlığına port yazmaz; yamasız ciadpi o zaman 80'e bağlanıyor, TLS el sıkışması kesiliyordu
+    /// (bağlantı testi ve Roblox'un giriş doğrulaması sistem proxy'si üzerinden başarısız oluyordu).
+    func testHTTPConnectUsesRequestLinePort() async throws {
+        guard let path = ciadpiPath else { throw XCTSkip("ciadpi bulunamadı") }
+        // Hedef: rastgele porttan dinleyen yerel soket. ciadpi hedefe bağlanamasa da hemen "200"
+        // döndüğü için asıl ölçüt, bağlantının bu sokete gelip gelmediğidir.
+        let target = socket(AF_INET, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(target, 0)
+        defer { close(target) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(target, $0, length) == 0 && listen(target, 4) == 0 && getsockname(target, $0, &length) == 0
+            }
+        }
+        XCTAssertTrue(bound)
+        let targetPort = Int(UInt16(bigEndian: address.sin_port))
+
+        let port = 18_650
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ByeDPIArguments.build(from: ByeDPIPresets.preset(id: ByeDPIPresets.defaultID)!.args, port: port)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+        }
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        for host in ["127.0.0.1", "127.0.0.1:\(targetPort)"] {
+            let connect = "CONNECT 127.0.0.1:\(targetPort) HTTP/1.1\r\nHost: \(host)\r\n\r\n"
+            let reply = String(decoding: Self.exchange(port: port, request: Array(connect.utf8), maxBytes: 64), as: UTF8.self)
+            XCTAssertTrue(reply.hasPrefix("HTTP/1.1 200"), "Host: \(host) -> \(reply.debugDescription)")
+            var pollFD = pollfd(fd: target, events: Int16(POLLIN), revents: 0)
+            guard poll(&pollFD, 1, 1_500) == 1 else {
+                XCTFail("Host: \(host): ciadpi hedef porta bağlanmadı")
+                continue
+            }
+            close(accept(target, nil, nil))
+        }
+    }
+
     /// 127.0.0.1:<port>'a bağlanır, isteği gönderir ve en fazla `maxBytes` bayt yanıt okur (2 sn zaman aşımı).
     nonisolated private static func exchange(port: Int, request: [UInt8], maxBytes: Int) -> [UInt8] {
         let fd = socket(AF_INET, SOCK_STREAM, 0)

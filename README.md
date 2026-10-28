@@ -13,7 +13,8 @@
   <a href="#türkçe">Türkçe</a> · <a href="#english">English</a> ·
   <a href="https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases">Releases</a> ·
   <a href="KULLANIM.md">Kullanım kılavuzu</a> ·
-  <a href="RELEASE_NOTES_v1.1.2.md">v1.1.2 notları</a> ·
+  <a href="RELEASE_NOTES_v1.1.3.md">v1.1.3 notları</a> ·
+  <a href="RELEASE_NOTES_v1.1.2.md">v1.1.2</a> ·
   <a href="RELEASE_NOTES_v1.1.1.md">v1.1.1</a> ·
   <a href="RELEASE_NOTES_v1.1.0.md">v1.1.0</a>
 </p>
@@ -41,7 +42,7 @@
 
 ### Kurulum
 
-1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.2.zip` dosyasını indirip açın.
+1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.3.zip` dosyasını indirip açın.
 2. `SplitWire-Turkey.app` dosyasını **Uygulamalar** (Applications) klasörüne sürükleyin.
 3. İlk açılış: Uygulama ad-hoc imzalıdır (Apple Developer ID / notarizasyon yok), bu yüzden macOS geliştiriciyi doğrulayamadığını söyler. Şunlardan birini yapın:
    - macOS 13–14: Uygulamaya sağ tıklayın (Control-tık) > **Aç** > **Aç**.
@@ -233,9 +234,9 @@ Gereksinimler: macOS ve tam **Xcode** 15+ (Swift 5.9+). Yalnızca Command Line T
 git clone https://github.com/a-mertdincer/SplitWire-Turkey-macOS.git
 cd SplitWire-Turkey-macOS
 
-./build.sh                     # evrensel sürüm: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.2.zip (+ .sha256)
+./build.sh                     # evrensel sürüm: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.3.zip (+ .sha256)
 ./build.sh --arch-native       # hızlı geliştirme derlemesi (yalnızca bu Mac'in mimarisi, zip yok)
-./build.sh 1.1.2 --skip-zip    # .app'i derle, imzala ve doğrula; zip oluşturma
+./build.sh 1.1.3 --skip-zip    # .app'i derle, imzala ve doğrula; zip oluşturma
 ./build.sh --clean             # önce .build ve build/ klasörlerini sil
 ```
 
@@ -291,7 +292,7 @@ MIT. Ayrıntılar için [LICENSE](LICENSE). Sorular ve hata bildirimleri: [Issue
 
 ### Installation
 
-1. Download `SplitWire-Turkey-v1.1.2.zip` from [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) and unzip it.
+1. Download `SplitWire-Turkey-v1.1.3.zip` from [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) and unzip it.
 2. Drag `SplitWire-Turkey.app` into your **Applications** folder.
 3. First launch: the app is signed ad-hoc (no Apple Developer ID / notarization), so macOS says it can't verify the developer. Do one of the following:
    - macOS 13–14: right-click (Control-click) the app > **Open** > **Open**.
@@ -483,9 +484,9 @@ Requirements: macOS and full **Xcode** 15+ (Swift 5.9+). The Command Line Tools 
 git clone https://github.com/a-mertdincer/SplitWire-Turkey-macOS.git
 cd SplitWire-Turkey-macOS
 
-./build.sh                     # universal release: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.2.zip (+ .sha256)
+./build.sh                     # universal release: SplitWire-Turkey.app + dist/SplitWire-Turkey-v1.1.3.zip (+ .sha256)
 ./build.sh --arch-native       # fast dev build (this Mac's architecture only, no zip)
-./build.sh 1.1.2 --skip-zip    # build, sign and verify the .app without the zip
+./build.sh 1.1.3 --skip-zip    # build, sign and verify the .app without the zip
 ./build.sh --clean             # delete .build and build/ first
 ```
 

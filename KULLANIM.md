@@ -1,6 +1,6 @@
 # SplitWire-Turkey macOS - Kullanım Kılavuzu
 
-Bu kılavuz v1.1.2 içindir. Kısa özet ve İngilizce açıklama için [README.md](README.md), sürüm notları için [RELEASE_NOTES_v1.1.2.md](RELEASE_NOTES_v1.1.2.md), [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md) ve [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) dosyalarına bakın.
+Bu kılavuz v1.1.3 içindir. Kısa özet ve İngilizce açıklama için [README.md](README.md), sürüm notları için [RELEASE_NOTES_v1.1.3.md](RELEASE_NOTES_v1.1.3.md) ve [RELEASE_NOTES_v1.1.2.md](RELEASE_NOTES_v1.1.2.md), [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md) ve [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) dosyalarına bakın.
 
 İçindekiler:
 
@@ -24,7 +24,7 @@ Bu kılavuz v1.1.2 içindir. Kısa özet ve İngilizce açıklama için [README.
 
 Gereksinimler: macOS 13 veya üstü, Apple Silicon veya Intel Mac.
 
-1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.2.zip` dosyasını indirin ve çift tıklayarak açın.
+1. [Releases](https://github.com/a-mertdincer/SplitWire-Turkey-macOS/releases) sayfasından `SplitWire-Turkey-v1.1.3.zip` dosyasını indirin ve çift tıklayarak açın.
 2. `SplitWire-Turkey.app` dosyasını **Uygulamalar** klasörüne sürükleyin.
 3. Uygulamayı açın.
 
@@ -42,7 +42,7 @@ Uygulama ad-hoc imzalıdır; Apple Developer ID ile imzalanmamış ve notarize e
 İsteğe bağlı: Sürüm sayfasında `.sha256` dosyası da varsa, indirdiğiniz zip'i doğrulayabilirsiniz (iki dosya aynı klasördeyken):
 
 ```bash
-shasum -a 256 -c SplitWire-Turkey-v1.1.2.zip.sha256
+shasum -a 256 -c SplitWire-Turkey-v1.1.3.zip.sha256
 ```
 
 ---
@@ -484,6 +484,13 @@ pkill -9 -x ciadpi                 # ciadpi normal kill sinyalini yok sayar, -9 
 ---
 
 ## Güncelleme
+
+### v1.1.2'den yükseltme
+
+1. v1.1.2'den çıkın (sistem proxy açıksa çıkarken kapatılır).
+2. Yeni `SplitWire-Turkey.app`'i Uygulamalar klasöründeki eskisinin üzerine kopyalayın ve ByeDPI'ı başlatın.
+
+Tüm ayarlarınız korunur. v1.1.3, ByeDPI'ın HTTPS proxy'sinin macOS uygulamalarında (bağlantı testi, Roblox'un giriş doğrulaması, Safari gibi Sistem Proxy kullananlar) bağlantıyı yanlış porta açması hatasını düzeltir. Ayrıntılar: [RELEASE_NOTES_v1.1.3.md](RELEASE_NOTES_v1.1.3.md).
 
 ### v1.1.1'den yükseltme
 

@@ -1,6 +1,6 @@
 # SplitWire-Turkey macOS - Proje Yapısı
 
-Sürüm: 1.1.2 · SwiftPM (tools 5.9, Swift 5 dil modu) · SwiftUI + AppKit · macOS 13+ · evrensel (arm64 + x86_64)
+Sürüm: 1.1.3 · SwiftPM (tools 5.9, Swift 5 dil modu) · SwiftUI + AppKit · macOS 13+ · evrensel (arm64 + x86_64)
 
 ## Dizin yapısı
 
@@ -11,12 +11,13 @@ SplitWire-Turkey-macOS/
 ├── scripts/
 │   ├── build-ciadpi.sh            # byedpi/ kaynaklarından ciadpi derler (evrensel veya --arch-native)
 │   └── verify-app.sh              # .app veya .zip doğrulama (imza, mimari, minos, Info.plist, CFBundleLocalizations, sha256)
-├── byedpi/                        # ByeDPI v17.3 kaynakları (hufrea, MIT) — ciadpi buradan derlenir
+├── byedpi/                        # ByeDPI v17.3 kaynakları (hufrea, MIT) + SplitWire yaması (proxy.c: CONNECT hedefi istek satırından) — ciadpi buradan derlenir
 ├── AppIcon.icns / AppIcon.iconset # Uygulama simgesi
 ├── splitwire-logo-128.png         # README logosu
 ├── README.md                      # Türkçe + İngilizce genel bakış
 ├── KULLANIM.md                    # Türkçe kullanım kılavuzu
 ├── PROJE-YAPISI.md                # Bu dosya
+├── RELEASE_NOTES_v1.1.3.md        # Sürüm notları (v1.1.3, ciadpi HTTP CONNECT port düzeltmesi)
 ├── RELEASE_NOTES_v1.1.2.md        # Sürüm notları (v1.1.2, #15 ve #13)
 ├── RELEASE_NOTES_v1.1.1.md        # Sürüm notları (v1.1.1, #13)
 ├── RELEASE_NOTES_v1.1.0.md        # Sürüm notları (v1.1.0)
@@ -57,7 +58,7 @@ SplitWire-Turkey-macOS/
 └── Tests/SplitWireTurkeyTests/
     ├── AppLaunchTests.swift                 # Kendi kendine yeniden başlatma (SelfRestartTrackerTests; sınıra yalnızca gerçek yeniden açmalar sayılır), KnownApps, bağlantı testi teşhisi (ConnectionDiagnosisTests)
     ├── ByeDPIPresetsTests.swift             # Preset sırası/argümanları, varsayılan Split 2, Fake yok, taşıma (Standart → Split 2 bir kez), argüman oluşturma (-G), proxy ortamı, editAsCustom
-    ├── ByeDPIServiceIntegrationTests.swift  # Gerçek ciadpi: başlat/yeniden başlat/durdur, yalnızca 127.0.0.1, SOCKS5 + HTTP CONNECT, boş Custom
+    ├── ByeDPIServiceIntegrationTests.swift  # Gerçek ciadpi: başlat/yeniden başlat/durdur, yalnızca 127.0.0.1, SOCKS5 + HTTP CONNECT, CONNECT hedef portu istek satırından (portsuz Host), boş Custom
     ├── DNSTests.swift                       # DNS zehirlenmesi kararı (Discord/Roblox), uyarı metni, DoH JSON, scutil ayrıştırma, DoH profili
     ├── LocalizationTests.swift              # Dil seçimi, eski anahtar taşıma, bildirim, LocalizedText ("Split 2 (önerilen)"), AppleLanguages eşitleme
     ├── NetworkSetupParserTests.swift        # networksetup/lsof ayrıştırma, SOCKS/HTTPS proxy durumu ve komutları, Shell, LineRingBuffer
@@ -128,7 +129,7 @@ Temel kurallar:
 
 ### Services/ByeDPIService.swift
 
-- ciadpi'yi `Process` ile doğrudan başlatır; argümanlar `ByeDPIArguments.build` ile oluşturulur (`-i 127.0.0.1 -p 1080 -G` yoksa eklenir). `-G` (`--http-connect`) aynı porta HTTP CONNECT desteği ekler: ciadpi önce SOCKS sürüm baytına, sonra `CONNECT`'e bakar, yani SOCKS5 istemcileri etkilenmez. Sistem HTTPS proxy'si (#13), favorilere verilen `HTTPS_PROXY` ve bağlantı testi bunu kullanır (#15).
+- ciadpi'yi `Process` ile doğrudan başlatır; argümanlar `ByeDPIArguments.build` ile oluşturulur (`-i 127.0.0.1 -p 1080 -G` yoksa eklenir). `-G` (`--http-connect`) aynı porta HTTP CONNECT desteği ekler: ciadpi önce SOCKS sürüm baytına, sonra `CONNECT`'e bakar, yani SOCKS5 istemcileri etkilenmez. Sistem HTTPS proxy'si (#13), favorilere verilen `HTTPS_PROXY` ve bağlantı testi bunu kullanır (#15). Vendored ciadpi'de tek SplitWire yaması vardır (`byedpi/proxy.c`, `connect_target`): CONNECT hedefi `Host` başlığından değil istek satırından (`CONNECT host:port`) okunur. macOS'un ağ yığını (URLSession, WebKit; bağlantı testi, Roblox'un giriş doğrulaması, Sistem Proxy kullanan Safari) `Host`'a port yazmaz; yamasız ciadpi o zaman 80'e bağlanıyordu (v1.1.3).
 - Açılışta preset: `ByeDPIPresets.migrate` (eski anahtar, bilinmeyen/kaldırılmış → Split 2), ardından `migrateOldDefault` (v1.1.2 tek seferlik geçiş: kayıtlı Standart → Split 2; `byedpiPresetMigratedToSplit2` ile bir kez). Geçiş yapıldıysa `.info` durum mesajı gösterilir; kullanıcı Standart'ı yeniden seçerse korunur. `defaultCustomArgs` = `-s 2 --tlsrec 1+s`.
 - `enableSystemProxy()`: Harici (bu oturumda başlatılmamış) bir ciadpi'nin komut satırında `-G`/`--http-connect` yoksa (ör. v1.1.0'dan kalma) sistem proxy açılmaz; HTTPS proxy CONNECT'i desteklemeyen bir sürece yönlenmesin diye kullanıcıdan yeniden başlatması istenir.
 - Başlatmadan önce 1080'deki LISTEN soketlerini `lsof` ile kontrol eder: kalmış ciadpi ise kapatıp yeniden denemeyi önerir, başka program ise adını ve PID'sini gösterir.
@@ -396,6 +397,7 @@ Xcode ile çalışmak için: `open Package.swift`.
 
 - [README.md](README.md): Genel bilgi, kurulum, sorun giderme (TR/EN)
 - [KULLANIM.md](KULLANIM.md): Ayrıntılı kullanım kılavuzu
+- [RELEASE_NOTES_v1.1.3.md](RELEASE_NOTES_v1.1.3.md): v1.1.3 değişiklikleri (ciadpi HTTP CONNECT hedef portunu `Host` yerine istek satırından okur; macOS URLSession/WebKit istemcileri, bağlantı testi ve Roblox giriş doğrulaması)
 - [RELEASE_NOTES_v1.1.2.md](RELEASE_NOTES_v1.1.2.md): v1.1.2 değişiklikleri (#15: Discord güncelleme denetimi, `HTTPS_PROXY`, varsayılan Split 2, otomatik yeniden açma, bağlantı testi; #13: Roblox için Hızlı İşlemler yolu)
 - [RELEASE_NOTES_v1.1.1.md](RELEASE_NOTES_v1.1.1.md): v1.1.1 değişiklikleri (#13: Roblox, SOCKS + HTTPS sistem proxy)
 - [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md): v1.1.0 değişiklikleri
